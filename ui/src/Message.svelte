@@ -13,8 +13,10 @@
   let inputElement: HTMLInputElement
   let message = ''
 
-  $: maxLength = 230 - ($messagePrefix?.length || 0) - ($messageSuffix?.length || 0)
-  $: remainingChars = maxLength - message.length
+  const textEncoder = new TextEncoder()
+
+  // The limit applies to the encoded bytes of the message as sent, including prefix and suffix
+  $: remainingChars = 230 - textEncoder.encode(`${$messagePrefix || ''} ${message} ${$messageSuffix || ''}`.trim()).length
   $: charCountClass = remainingChars <= 0 ? 'text-red-700' : remainingChars <= 40 ? 'text-yellow-700' : 'text-gray-600'
 
   $: if (inputElement && $messageDestination) {
@@ -22,7 +24,7 @@
   }
 
   function send() {
-    if (!message) return
+    if (!message || remainingChars < 0) return
 
     let payload = { message }
     if (channels.value.some((c) => c.index == $messageDestination)) {
@@ -47,13 +49,13 @@
     <select bind:value={$messageDestination} class="input font-normal text-sm border border-blue-500/50 !bg-blue-950" name="" id="">
       <option disabled>== Channels ==</option>
       {#each $channels as channel}
-        {#if channel.role != 'DISABLED'}
+        {#if channel.role != 0}
           <option value={channel.index}>{channel.settings.name || `Channel ${channel.index}`}</option>
         {/if}
       {/each}
 
       <option disabled>== Nodes ==</option>
-      {#each [...$filteredNodes].sort((a, b) => {
+      {#each $filteredNodes.filter((node) => !node.user?.isUnmessagable).sort((a, b) => {
         return getNodeName(a).localeCompare(getNodeName(b))
       }) as node}
         <option value={node.num}>{getNodeName(node)}</option>
@@ -63,8 +65,8 @@
 
   <form on:submit|preventDefault={send} class="p-2 flex flex-col gap-1 text-sm">
     <div class="flex gap-1" class:flex-col={$smallMode}>
-      <input maxlength={maxLength} bind:this={inputElement} class="input w-full" size="3" type="text" bind:value={message} />
-      <button class="btn">Send</button>
+      <input bind:this={inputElement} class="input w-full" size="3" type="text" bind:value={message} />
+      <button class="btn" disabled={remainingChars < 0} title={remainingChars < 0 ? 'Message is too long' : ''}>Send</button>
     </div>
   </form>
 </Card>

@@ -9,6 +9,10 @@ interface StateFlags {
   persist?: boolean | 'api' | 'ui'
   primaryKey?: string
   hideLog?: boolean
+  /** Never sent to clients that have not been granted access */
+  private?: boolean
+  /** Property names removed from the value before it is sent to clients that have not been granted access */
+  redact?: string[]
   [e: string]: any
 }
 
@@ -60,8 +64,9 @@ export class State<T = any> {
 
   subscribe(callback: ValueCallback<T>): () => void {
     callback(this.value, this)
-    this.events.on('notify', () => callback(this.value, this))
-    return () => this.events.removeListener('notify', callback)
+    let listener = () => callback(this.value, this)
+    this.events.on('notify', listener)
+    return () => this.events.removeListener('notify', listener)
   }
 
   static subscribe<T = any>(callback: ActionCallback<T>) {
@@ -111,9 +116,20 @@ export class State<T = any> {
     this.notify('update', key, value)
   }
 
-  /** Search array and run `Object.assign` on first match.  If no match, value will be appended */
+  /** Search array and run `Object.assign` on the matching record.  If no match, value will be appended */
   upsert(value: object, primaryKey: string = (this.flags.primaryKey as string) || 'id') {
-    let match = (this.value as any[]).find((record: any) => record[primaryKey] == value[primaryKey] && record[primaryKey] != undefined)
+    let key = value[primaryKey]
+    let match: any
+    // Search newest-first: updates almost always target a recently appended record
+    if (key != undefined) {
+      let records = this.value as any[]
+      for (let index = records.length - 1; index >= 0; index--) {
+        if (records[index][primaryKey] == key) {
+          match = records[index]
+          break
+        }
+      }
+    }
     if (match) Object.assign(match, value)
     else (this.value as any[]).push(value)
     this.notify('upsert', value, primaryKey)

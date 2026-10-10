@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { connectionStatus, address, enableTLS, myNodeMetadata, myNodeNum, nodes, lastFromRadio } from 'api/src/vars'
+  import { connectionStatus, address, enableTLS, lastFromRadio, lockdownStatus } from 'api/src/vars'
   import Card from './lib/Card.svelte'
   import { smallMode } from './Nodes.svelte'
   import { hasAccess } from './lib/util'
@@ -25,6 +25,9 @@
   let spinnerAngle = 0
 
   $: if ($lastFromRadio && $connectionStatus == 'configuring') spinnerAngle = (spinnerAngle + 8) % 360
+
+  /** Lockdown states in which the device withholds data until it is unlocked */
+  $: lockdownNotice = ['NEEDS_PROVISION', 'LOCKED', 'UNLOCK_FAILED'].includes($lockdownStatus?.stateName) ? $lockdownStatus : undefined
 </script>
 
 <Card title="Address" {...$$restProps}>
@@ -58,4 +61,11 @@
       {/if}
     {/if}
   </form>
+  {#if lockdownNotice}
+    <div class="text-xs bg-amber-700/40 text-amber-100 rounded m-2 mt-0 p-1.5">
+      Device lockdown: <span class="font-bold">{lockdownNotice.stateName.replace('_', ' ').toLowerCase()}</span>
+      {#if lockdownNotice.lockReason}({lockdownNotice.lockReason}){/if}
+      <div>Unlock or provision the device with an official Meshtastic app to receive data.</div>
+    </div>
+  {/if}
 </Card>

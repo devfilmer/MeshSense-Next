@@ -1,5 +1,5 @@
 <script context="module" lang="ts">
-  import { currentTime, myNodeMetadata, myNodeNum, nodeInactiveTimer, nodes, pendingTraceroutes, type NodeInfo } from 'api/src/vars'
+  import { currentTime, myNodeInfo, myNodeMetadata, myNodeNum, nodeInactiveTimer, nodes, pendingTraceroutes, type NodeInfo } from 'api/src/vars'
   export let smallMode = writable(false)
   export let selectNodeFilterInput = writable(false)
   export let filteredNodes = writable<NodeInfo[]>([])
@@ -50,22 +50,24 @@
 
   function filterNodes() {
     $inactiveNodes = $nodes.filter(isInactive)
+    const inactiveNums = new Set($inactiveNodes.map((node) => node.num))
+    const text = $filterText.toLowerCase()
+    const myCoords = getCoordinates($myNodeNum)
 
     $filteredNodes = $nodes
       .filter((node) => {
         switch ($nodeVisibilityMode) {
           case 'inactive':
-            return $inactiveNodes.some((inactive) => node.num === inactive.num)
+            return inactiveNums.has(node.num)
           case 'all':
             return true
           case 'active':
           default:
-            return node.num === $myNodeNum || !$inactiveNodes.some((inactive) => node.num === inactive.num)
+            return node.num === $myNodeNum || !inactiveNums.has(node.num)
         }
       })
       .filter((node) => includeMqtt || !node.viaMqtt)
       .filter((node) => {
-        const text = $filterText.toLowerCase()
         return (
           node.user?.longName?.toLowerCase().includes(text) ||
           node.user?.shortName?.toLowerCase().includes(text) ||
@@ -123,7 +125,6 @@
           case 'distance':
             const aCoords = getCoordinates(a)
             const bCoords = getCoordinates(b)
-            const myCoords = getCoordinates($myNodeNum)
             if (aCoords[0] && aCoords[1] && myCoords[0] && myCoords[1]) {
               aValue = Math.sqrt(Math.pow(aCoords[0] - myCoords[0], 2) + Math.pow(aCoords[1] - myCoords[1], 2))
             } else {
@@ -209,6 +210,27 @@
         <h2 class="rounded">Firmware</h2>
         <div class="grow">{$myNodeMetadata?.firmwareVersion}</div>
       </div>
+
+      {#if $myNodeInfo?.pioEnv}
+        <div class="flex items-center bg-black/20 rounded gap-2 grow">
+          <h2 class="rounded">Build</h2>
+          <div class="grow">{$myNodeInfo.pioEnv}</div>
+        </div>
+      {/if}
+
+      {#if $myNodeInfo?.nodedbCount}
+        <div class="flex items-center bg-black/20 rounded gap-2 grow">
+          <h2 class="rounded">NodeDB</h2>
+          <div class="grow">{$myNodeInfo.nodedbCount} nodes</div>
+        </div>
+      {/if}
+
+      {#if $myNodeMetadata?.hasXeddsa != undefined}
+        <div class="flex items-center bg-black/20 rounded gap-2 grow">
+          <h2 class="rounded">Packet Signing</h2>
+          <div class="grow">{$myNodeMetadata.hasXeddsa ? 'Supported' : 'Not supported'}</div>
+        </div>
+      {/if}
     {/if}
   </div>
   <pre class="mt-2 overflow-auto rounded p-2 h-full bg-black/20">{JSON.stringify(selectedNode, undefined, 2)}</pre>
@@ -340,6 +362,21 @@
               {#if node.viaMqtt}
                 <div title="Node heard via MQTT" class="bg-rose-900/50 text-rose-200 rounded px-1 cursor-help text-xs">MQTT</div>
               {/if}
+              {#if node.hasXeddsaSigned}
+                <div title="Sends signed packets (XEdDSA){node.isKeyManuallyVerified ? ', key manually verified' : ''}" class="cursor-help text-xs">🔏</div>
+              {/if}
+              {#if node.isFavorite}
+                <div title="Favorite" class="cursor-help text-xs">⭐</div>
+              {/if}
+              {#if node.user?.isUnmessagable}
+                <div title="Unmessagable: this node does not monitor messages" class="bg-slate-500/50 text-slate-200 rounded px-1 cursor-help text-xs">UM</div>
+              {/if}
+              {#if node.isMuted}
+                <div title="Muted" class="cursor-help text-xs">🔕</div>
+              {/if}
+              {#if node.isIgnored}
+                <div title="Ignored" class="cursor-help text-xs">🚫</div>
+              {/if}
               <div class="grow"></div>
               {#if node.snr && node.hopsAway == 0}
                 <!-- display observed RF values -->
@@ -428,6 +465,10 @@
               {/if}
             </div>
 
+            {#if node.status}
+              <div title="Node status: {node.status}" class="text-xs italic truncate max-w-64 text-white/60 px-1">{node.status}</div>
+            {/if}
+
             {#if node.environmentMetrics}
               <div class="flex gap-1">
                 {#if node.environmentMetrics.temperature}
@@ -453,6 +494,14 @@
                 {#if node.environmentMetrics.iaq}
                   <div title="Air Quality" class="text-sm font-normal bg-purple-950/20 text-purple-200/90 rounded p-0.5 w-16 h-6 text-center overflow-hidden">
                     {Math.round(node.environmentMetrics.iaq)} IAQ
+                  </div>
+                {/if}
+                {#if node.environmentMetrics.lightningStrikeCount1h}
+                  <div
+                    title="Lightning strikes in the last hour{node.environmentMetrics.lightningDistanceKm ? `, nearest ${Math.round(node.environmentMetrics.lightningDistanceKm)} km` : ''}"
+                    class="text-sm font-normal bg-purple-950/20 text-purple-200/90 rounded p-0.5 w-16 h-6 text-center overflow-hidden"
+                  >
+                    ⚡ {node.environmentMetrics.lightningStrikeCount1h}/h
                   </div>
                 {/if}
               </div>

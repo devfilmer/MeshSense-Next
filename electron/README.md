@@ -1,4 +1,4 @@
-# MeshSense
+# MeshSense Next
 
 A minimal Electron application with TypeScript
 

@@ -142,19 +142,7 @@
       <div class="font-bold">Highlight own node's log entries</div>
     </label>
 
-    <label class="flex gap-2 items-center">
-      <input
-        type="checkbox"
-        checked={$updateChannel == 'beta'}
-        on:change={async (e) => {
-          e.currentTarget.checked ? ($updateChannel = 'beta') : ($updateChannel = 'latest')
-          await tick()
-          axios.get('/checkUpdate')
-        }}
-      />
-      <div class="font-bold">MeshSense Beta Updates</div>
-      <button class="btn !mr-auto" on:click={() => axios.get('/checkUpdate')}>Check for updates</button>
-    </label>
+    <div class="text-sm text-white/60">Automatic updates are turned off in MeshSense Next; new versions are installed manually.</div>
 
     <hr class="opacity-25" />
 
@@ -169,7 +157,7 @@
   {/if}
 
   <div>
-    For your convienience, MeshSense can be remotely accessed using the following address: <a class="w-full" target="_blank" rel="noreferrer" href="http://{$apiHostname}:{$apiPort}"
+    For your convenience, MeshSense Next can be remotely accessed using the following address: <a class="w-full" target="_blank" rel="noreferrer" href="http://{$apiHostname}:{$apiPort}"
       >http://{$apiHostname}:{$apiPort}</a
     >
   </div>

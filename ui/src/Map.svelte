@@ -4,13 +4,18 @@
   export let setPositionMode = writable(false)
   import { generateHexer } from '@bdancer/icon-gaga'
 
+  const svgUriCache = new Map<string, string>()
+
+  /** Node icons are deterministic per name, so each is generated once */
   export function getSvgUri(name: string) {
-    const hexId = parseInt(name).toString(16).padStart(8, '0')
-    const colorId = hexId.slice(-6)
-    return 'data:image/svg+xml;utf8,' + encodeURIComponent(generateHexer({ 
-      name,
-      borderColor: `#${colorId}`
-    }))
+    let uri = svgUriCache.get(name)
+    if (!uri) {
+      const hexId = parseInt(name).toString(16).padStart(8, '0')
+      const colorId = hexId.slice(-6)
+      uri = 'data:image/svg+xml;utf8,' + encodeURIComponent(generateHexer({ name, borderColor: `#${colorId}` }))
+      svgUriCache.set(name, uri)
+    }
+    return uri
   }
 
   export function getIconURL(node: NodeInfo) {
@@ -32,6 +37,7 @@
   import { getCoordinates, getNodeById, getNodeName, getNodeNameById, setPosition } from './lib/util'
   import { showConfigModal, showPage } from './SettingsModal.svelte'
   import { newsVisible } from './News.svelte'
+  import { onDestroy } from 'svelte'
 
   export let ol: OpenLayersMap = undefined
 
@@ -45,7 +51,9 @@
       nodesWithCoords
         .filter((n) => (n.trace || n.hopsAway == 0) && $nodeVisibilityMode != 'inactive' && !n.trace?.route?.some((routeNodeId) => isInactive(getNodeById(routeNodeId))))
         .map((n) => {
-          let list: any[] = [...(n.trace?.route?.map((traceNode) => getCoordinates(traceNode)) || []), getCoordinates(n)]
+          // A node now heard directly is drawn with a direct line, even if an earlier multi-hop route is still stored
+          let route = n.hopsAway == 0 ? [] : n.trace?.route || []
+          let list: any[] = [...route.map((traceNode) => getCoordinates(traceNode)), getCoordinates(n)]
           if (myNodeCoords[0] && myNodeCoords[1]) list.unshift(myNodeCoords)
           return list.filter((coords) => !(coords[0] == 0 && coords[1] == 0))
         })
@@ -65,11 +73,27 @@
     )
   }
 
+  let plotTimer: ReturnType<typeof setTimeout>
+  let lastPlotTime = 0
+
+  /** Redrawing rebuilds every map feature, so limit it to once per second */
+  function schedulePlot() {
+    if (plotTimer) return
+    plotTimer = setTimeout(
+      () => {
+        plotTimer = undefined
+        lastPlotTime = Date.now()
+        if (ol) plotData()
+      },
+      Math.max(0, 1000 - (Date.now() - lastPlotTime))
+    )
+  }
+
+  onDestroy(() => clearTimeout(plotTimer))
+
   $: {
     $myNodeNum, nodesWithCoords
-    if (ol) {
-      plotData()
-    }
+    if (ol) schedulePlot()
   }
 
   let modalPage = 'Settings'
@@ -82,9 +106,9 @@
     <div class="grow">
       <button on:click={() => ($expandedMap = !$expandedMap)} class="btn font-normal text-xs">{$expandedMap ? 'Collapse' : 'Expand'}</button>
     </div>
-    <div class="text-xs text-white/50 pr-2">MeshSense {$version}</div>
-    <a href="https://affirmatech.com" target="_blank" rel="noopener" class="text-xs text-white/50 pr-2 font-normal">by Affirmatech</a>
-    <a title="Support MeshSense" target="_blank" rel="noopener" class="!text-rose-400 font-bold btn text-sm hover:brightness-110" href="https://purchase.affirmatech.com/?productId=MeshSenseDonation"
+    <div class="text-xs text-white/50 pr-2">MeshSense Next {$version}</div>
+    <a href="https://affirmatech.com/meshsense" target="_blank" rel="noopener" title="MeshSense Next is based on MeshSense by Affirmatech" class="text-xs text-white/50 pr-2 font-normal">based on MeshSense by Affirmatech</a>
+    <a title="Support MeshSense (Affirmatech)" target="_blank" rel="noopener" class="!text-rose-400 font-bold btn text-sm hover:brightness-110" href="https://purchase.affirmatech.com/?productId=MeshSenseDonation"
       >♥</a
     >
     <button title="What's New?" class="btn btn-sm h-6 grid place-content-center" on:click={() => newsVisible.set(true)}>📰</button>

@@ -1,20 +1,33 @@
-import { accessKey, apiHostname, broadcastId, lastFromRadio, nodes, packets, type NodeInfo } from 'api/src/vars'
+import { broadcastId, nodes, packets, type NodeInfo } from 'api/src/vars'
 import { tick } from 'svelte'
-import { derived, get, writable } from 'svelte/store'
+import { get, writable } from 'svelte/store'
 import { enableAudioAlerts } from '../Settings.svelte'
 import axios from 'axios'
+import { events, send } from './wsc'
 
 export let blockUserKey = writable(false)
 export const userKey = writable(localStorage.getItem('userKey') || '')
 
-export const hasAccess = derived([accessKey, userKey], ([$accessKey, $userKey]) => window.location.hostname == 'localhost' || ($accessKey != '' && $accessKey == $userKey))
+/** Whether the server has granted this client privileged access (local connection or valid access key) */
+export const hasAccess = writable(false)
 
 let failedUserKeyAttempts = 0
-userKey.subscribe(async (value) => {
-  axios.defaults.headers['authorization'] = `Bearer ` + value
-  await tick()
+let awaitingKeyResult = false
 
-  if (get(hasAccess)) {
+function sendUserKey() {
+  let key = get(userKey)
+  awaitingKeyResult = key != ''
+  send('auth', { key }, false)
+}
+
+events.on('connect', sendUserKey)
+
+events.on('authState', ({ authorized }) => {
+  hasAccess.set(authorized)
+  if (!awaitingKeyResult) return
+  awaitingKeyResult = false
+
+  if (authorized) {
     failedUserKeyAttempts = 0
   } else {
     failedUserKeyAttempts += 1
@@ -23,9 +36,12 @@ userKey.subscribe(async (value) => {
       blockUserKey.set(false)
     }, Math.min(1000 * failedUserKeyAttempts, 10000))
   }
+})
 
-  // console.log({ failedUserKeyAttempts })
+userKey.subscribe((value) => {
+  axios.defaults.headers['authorization'] = `Bearer ` + value
   localStorage.setItem('userKey', value)
+  sendUserKey()
 })
 
 export function unixSecondsTimeAgo(seconds) {
@@ -73,8 +89,24 @@ export function getCoordinates(node: NodeInfo | number) {
   return [node?.position?.longitudeI / 10000000, node?.position?.latitudeI / 10000000]
 }
 
+let nodeIndex: Map<number, NodeInfo>
+let relayIndex: Map<number, NodeInfo[]>
+nodes.subscribe(() => {
+  nodeIndex = undefined
+  relayIndex = undefined
+})
+
+/** Lookup by node number, rebuilt on first use after the node list changes */
+function findNode(num: number) {
+  if (!nodeIndex) {
+    nodeIndex = new Map()
+    for (let node of nodes.value ?? []) nodeIndex.set(node.num, node)
+  }
+  return nodeIndex.get(num)
+}
+
 export function getNodeById(num: number) {
-  return nodes.value.find((n) => n.num == num) || ({ num } as NodeInfo)
+  return findNode(num) || ({ num } as NodeInfo)
 }
 
 export let audioNewMessage = new Audio(`${import.meta.env.VITE_PATH || ''}/audioNewMessage.mp3`)
@@ -86,8 +118,97 @@ packets.on('upsert', (e) => {
 export function getNodeNameById(id: number) {
   if (id == broadcastId) return 'all'
   if (id == undefined) return 'unknown'
-  let node = nodes.value.find((node) => node.num == id)
+  let node = findNode(id)
   return node ? getNodeName(node) : `!${id?.toString(16)?.padStart(8, '0')}`
+}
+
+/** Packets identify the relaying node by the last byte of its number only, so a name is given when it is unambiguous */
+export function getRelayName(relayNode: number) {
+  if (!relayNode) return ''
+  if (!relayIndex) {
+    relayIndex = new Map()
+    for (let node of nodes.value ?? []) {
+      let key = node.num & 0xff
+      relayIndex.has(key) ? relayIndex.get(key).push(node) : relayIndex.set(key, [node])
+    }
+  }
+  let candidates = relayIndex.get(relayNode & 0xff) ?? []
+  let direct = candidates.filter((node) => node.hopsAway == 0)
+  if (direct.length == 1) return getNodeName(direct[0])
+  if (candidates.length == 1) return getNodeName(candidates[0])
+  return `!…${(relayNode & 0xff).toString(16).padStart(2, '0')}`
+}
+
+/** `MeshPacket.transportMechanism` values worth labelling */
+const transportLabels = { 5: 'MQTT', 6: 'UDP', 7: 'API', 8: 'UDP' }
+
+export function getTransportLabel(packet: { viaMqtt?: boolean; transportMechanism?: number }) {
+  return packet.viaMqtt ? 'MQTT' : (transportLabels[packet.transportMechanism] ?? '')
+}
+
+/** Fields shown for each telemetry type as `[field, unit, decimals]` */
+const telemetryFields: Record<string, [string, string, number?][]> = {
+  environmentMetrics: [
+    ['temperature', '°C', 1],
+    ['relativeHumidity', '%'],
+    ['barometricPressure', ' hPa'],
+    ['iaq', ' IAQ'],
+    ['lux', ' lx'],
+    ['windSpeed', ' m/s', 1],
+    ['rainfall1h', ' mm/h', 1],
+    ['radiation', ' µR/h', 1],
+    ['soilMoisture', '% soil'],
+    ['lightningStrikeCount1h', ' strikes/h'],
+    ['lightningDistanceKm', ' km']
+  ],
+  powerMetrics: [
+    ['ch1Voltage', 'V', 2],
+    ['ch1Current', 'mA'],
+    ['ch2Voltage', 'V', 2],
+    ['ch2Current', 'mA'],
+    ['ch3Voltage', 'V', 2],
+    ['ch3Current', 'mA']
+  ],
+  airQualityMetrics: [
+    ['pm10Standard', ' PM1'],
+    ['pm25Standard', ' PM2.5'],
+    ['pm100Standard', ' PM10'],
+    ['co2', ' ppm CO₂']
+  ],
+  localStats: [
+    ['numOnlineNodes', ' online'],
+    ['numTotalNodes', ' nodes'],
+    ['channelUtilization', '% ch', 1],
+    ['airUtilTx', '% tx', 1],
+    ['noiseFloor', ' dBm noise']
+  ],
+  healthMetrics: [
+    ['heartBpm', ' bpm'],
+    ['spO2', '% SpO₂'],
+    ['temperature', '°C', 1]
+  ],
+  hostMetrics: [
+    ['load1', ' load'],
+    ['freememBytes', ' B free']
+  ],
+  trafficManagementStats: [
+    ['packetsInspected', ' inspected'],
+    ['rateLimitDrops', ' rate limited'],
+    ['positionDedupDrops', ' deduplicated'],
+    ['hopExhaustedPackets', ' hop exhausted']
+  ]
+}
+
+/** One-line summary of a telemetry payload, limited to the values that are present */
+export function summarizeTelemetry(variant: { case?: string; value?: Record<string, any> }) {
+  let parts = []
+  for (let [field, unit, decimals] of telemetryFields[variant?.case] ?? []) {
+    let value = variant.value?.[field]
+    if (value == undefined || value === 0) continue
+    parts.push(Number(value).toFixed(decimals ?? 0) + unit)
+    if (parts.length == 5) break
+  }
+  return parts.join('  ')
 }
 
 export function getNodeName(node: NodeInfo) {

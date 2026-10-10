@@ -1,3 +1,4 @@
+import './lib/webcrypto'
 import 'dotenv/config'
 import './lib/persistence'
 import { app, createRoutes, finalize, server } from './lib/server'
@@ -10,6 +11,7 @@ import { createWriteStream } from 'fs'
 import { dataDirectory } from './lib/paths'
 import { join } from 'path'
 import axios from 'axios'
+import { isAuthorized } from './lib/auth'
 setInterval(() => currentTime.set(Date.now()), 15000)
 
 process.on('uncaughtException', (err, origin) => {
@@ -32,18 +34,6 @@ intercept(
     while (consoleLog.length >= logSize) consoleLog.shift()
   }
 )
-
-function isAuthorized(req: any) {
-  let token = req.headers['authorization']?.split(' ')[1]
-  console.log('Remote Address', req.socket.remoteAddress)
-  return (
-    req.socket.remoteAddress.includes('127.0.0.1') ||
-    req.socket.remoteAddress.includes('ffff') ||
-    req.socket.remoteAddress.includes('localhost') ||
-    req.socket.remoteAddress.includes('::1') ||
-    (accessKey.value != '' && accessKey.value == token)
-  )
-}
 
 createRoutes((app) => {
   app.post('/send', (req, res) => {
@@ -72,6 +62,7 @@ createRoutes((app) => {
     if (!isAuthorized(req)) return res.sendStatus(403)
     let nodes = req.body.nodes
     await deleteNodes(nodes)
+    return res.sendStatus(200)
   })
 
   app.post('/connect', async (req, res) => {
@@ -89,12 +80,12 @@ createRoutes((app) => {
   })
 
   app.get('/consoleLog', async (req, res) => {
-    if (req.query.accessKey != accessKey.value && req.hostname.toLowerCase() != 'localhost') return res.sendStatus(403)
+    if (!isAuthorized(req)) return res.sendStatus(403)
     return res.json(consoleLog)
   })
 
   app.get('/deviceConfig', async (req, res) => {
-    if (req.query.accessKey != accessKey.value && req.hostname.toLowerCase() != 'localhost') return res.sendStatus(403)
+    if (!isAuthorized(req)) return res.sendStatus(403)
     return res.json(deviceConfig)
   })
 

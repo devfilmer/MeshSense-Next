@@ -14,7 +14,18 @@ export let socket: WebSocket | undefined = undefined
 export let status: 'Ready' | 'Connecting' | 'Connected' | 'Disconnected' | 'Closed' = 'Ready'
 
 let pendingMessages: MessageObject[] = []
-let reconnectTimeout: number
+let reconnectTimeout: ReturnType<typeof setTimeout>
+
+/** Send an event to the server. Unless `queue` is disabled, messages are held until the connection is open */
+export function send(event: string, data?: any, queue = true) {
+  let message = JSON.stringify({ event, data })
+  try {
+    if (socket?.readyState === WebSocket.OPEN) socket.send(message)
+    else if (queue) pendingMessages.push({ event, data })
+  } catch (e) {
+    console.log(`Unable to send data | ${e}`)
+  }
+}
 
 export class WebSocketClient {
   constructor(endpoint?: string, syncStates = true) {
@@ -32,6 +43,16 @@ export class WebSocketClient {
       }
 
       events.on('state', ({ name, action, args }) => setState(name, action, args))
+      // Applied within a single task so the interface renders once per batch
+      events.on('stateBatch', (batch: { name: string; action: string; args: any[] }[]) => {
+        for (let { name, action, args } of batch) {
+          try {
+            setState(name, action, args)
+          } catch (e) {
+            console.error(`Unable to apply ${action} to state ${name}`, e)
+          }
+        }
+      })
       events.on('initState', (stateData) => {
         State.defaults = stateData
         if (stateData) console.log('[ws] Received current state')
@@ -60,7 +81,9 @@ export class WebSocketClient {
         console.log(`Connected to ${endpoint}`)
         status = 'Connected'
         events.emit('connect', e)
-        for (let message of pendingMessages) this.send(message.event, message.data)
+        let messages = pendingMessages
+        pendingMessages = []
+        for (let message of messages) this.send(message.event, message.data)
       }
       socket.onerror = (e) => {
         console.error(`Failed websocket connection to ${endpoint}`)
@@ -88,13 +111,7 @@ export class WebSocketClient {
   }
 
   send(event: string, data?: any) {
-    let message = JSON.stringify({ event, data })
-    try {
-      if (socket?.readyState === WebSocket.OPEN) socket.send(message)
-      else pendingMessages.push({ event, data })
-    } catch (e) {
-      console.log(`Unable to send data | ${e}`)
-    }
+    send(event, data)
   }
 }
 

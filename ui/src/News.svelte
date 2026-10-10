@@ -17,17 +17,17 @@
   }
 </script>
 
-<Modal title="Here's the latest in MeshSense!" bind:visible={$newsVisible} fillHeight={true}>
+<Modal title="Here's the latest from MeshSense (the project MeshSense Next is based on)" bind:visible={$newsVisible} fillHeight={true}>
   <div class="flex flex-col h-full gap-4">
     <iframe title="MeshSense News" src="https://affirmatech.com/meshsense/news?contentOnly=1&?timestamp={Date.now()}" class="grow h-full w-full"></iframe>
     <div>
-      Enjoying MeshSense? Please consider <a
-        title="Support MeshSense"
+      MeshSense Next is based on MeshSense by Affirmatech. Enjoying it? Please consider <a
+        title="Support MeshSense (Affirmatech)"
         target="_blank"
         rel="noopener"
         class="btn text-sm hover:text-white"
-        href="https://purchase.affirmatech.com/?productId=MeshSenseDonation">supporting us</a
-      > and future development! Thanks! 🙂
+        href="https://purchase.affirmatech.com/?productId=MeshSenseDonation">supporting their work</a
+      > and future development. Thanks! 🙂
     </div>
   </div>
 </Modal>

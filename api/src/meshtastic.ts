@@ -3,7 +3,7 @@
  */
 
 // import { HttpConnection, BleConnection } from '@meshtastic/js'
-import { HttpConnection, BleConnection, Protobuf } from '../meshtastic-js/dist'
+import { HttpConnection, BleConnection, Protobuf, Utils, fromBinary } from '../meshtastic-js/dist'
 import {
   Channel,
   MeshPacket,
@@ -16,9 +16,11 @@ import {
   connectionStatus,
   enableTLS,
   lastFromRadio,
+  lockdownStatus,
   meshMapForwarding,
   messagePrefix,
   messageSuffix,
+  myNodeInfo,
   myNodeMetadata,
   myNodeNum,
   nodes,
@@ -66,6 +68,8 @@ function uploadMyNode() {
 
 function sendToMeshMap(updates: Partial<NodeInfo & { name?: string }>, node?: NodeInfo, packet?: MeshPacket) {
   if (connectionStatus.value == 'connected' && meshMapForwarding.value) {
+    // Packets replayed from the device's stored history are not current observations
+    if (packet?.rxTime && Date.now() / 1000 - packet.rxTime > 600) return
     if (packet && packet.from != myNodeNum.value) updates.hopsAway = packet.hopStart - packet.hopLimit
     if (node && node.user?.shortName) updates.name = node.user?.shortName
     // console.log('MeshMap Send', updates)
@@ -172,6 +176,31 @@ function extractPayload(packet: MeshPacket): Record<string, any> {
   return { [packet[key]?.case]: packet[key]?.value }
 }
 
+const { PortNum } = Protobuf.Portnums
+const textDecoder = new TextDecoder()
+
+/** Decoders for ports the library does not raise a dedicated event for */
+const portDecoders: Record<number, (payload: Uint8Array) => any> = {
+  [PortNum.ALERT_APP]: (payload) => textDecoder.decode(payload),
+  [PortNum.NODE_STATUS_APP]: (payload) => fromBinary(Protobuf.Mesh.StatusMessageSchema, payload),
+  [PortNum.MESH_BEACON_APP]: Utils.decodeMeshBeacon,
+  [PortNum.KEY_VERIFICATION_APP]: (payload) => fromBinary(Protobuf.Mesh.KeyVerificationSchema, payload),
+  [PortNum.STORE_FORWARD_PLUSPLUS_APP]: (payload) => fromBinary(Protobuf.Mesh.StoreForwardPlusPlusSchema, payload)
+}
+
+/** FromRadio messages beyond mesh packets and device configuration */
+function handleFromRadioVariant(fromRadio: Protobuf.Mesh.FromRadio) {
+  let variant = fromRadio.payloadVariant
+  if (variant.case == 'clientNotification') {
+    console.log('[meshtastic] Device notification:', variant.value.message)
+    packets.push({ from: myNodeNum.value, rxTime: variant.value.time || Date.now() / 1000, channel: '', notification: copy(variant.value) } as any)
+  } else if (variant.case == 'lockdownStatus') {
+    lockdownStatus.set({ ...copy(variant.value), stateName: Protobuf.Mesh.LockdownStatus_State[variant.value.state] })
+  } else if (variant.case == 'regionPresets') {
+    deviceConfig.regionPresets = copy(variant.value)
+  }
+}
+
 /** Disconnect from any existing connection */
 export async function disconnect(setIntent = true) {
   connectionStatus.set('disconnected')
@@ -191,6 +220,8 @@ export function reset() {
   channels.set([])
   myNodeNum.set(undefined)
   myNodeMetadata.set(undefined)
+  myNodeInfo.set(undefined)
+  lockdownStatus.set(undefined)
   deleteInProgress = false
   deviceConfig = {}
   pendingTraceroutes.set([])
@@ -270,26 +301,57 @@ export async function connect(address?: string) {
   /** All packets */
   connection.events.onMeshPacket.subscribe((e: Protobuf.Mesh.MeshPacket) => {
     if (e.from) {
+      let now = Date.now() / 1000
+      // Firmware 2.8 replays each stored node's last position, telemetry and status as ordinary packets
+      // right after configuration, stamped with the time the device last heard that node. Use that
+      // timestamp when present so history is not shown as current activity; live packets carry a
+      // timestamp of about now anyway, and devices without a valid clock omit it.
       let updates: any = {
         num: e.from,
         viaMqtt: e.viaMqtt,
-        lastHeard: Date.now() / 1000
+        lastHeard: e.rxTime && e.rxTime < now + 300 ? e.rxTime : now
       }
 
       if (e.hopStart) {
         Object.assign(updates, {
           snr: e.rxSnr,
-          rssi: e.rxRssi,
           hopsAway: e.hopStart - e.hopLimit
         })
+        // Replayed packets have no RSSI; keep the last real reading instead of clearing it
+        if (e.rxRssi != undefined) updates.rssi = e.rxRssi
+      }
+
+      if (e.xeddsaSigned) updates.hasXeddsaSigned = true
+
+      let packet = copy(e)
+      let alertMessage: any
+
+      if (e.payloadVariant.case == 'decoded') {
+        let { portnum, payload } = e.payloadVariant.value
+        packet.portName = PortNum[portnum] ?? `PORT_${portnum}`
+        if (portDecoders[portnum]) {
+          try {
+            let data = copy(portDecoders[portnum](payload))
+            if (portnum == PortNum.ALERT_APP) alertMessage = { id: e.id, from: e.from, to: e.to, channel: e.channel, data, show: true, alert: true }
+            else packet.data = data
+            if (portnum == PortNum.NODE_STATUS_APP) updates.status = data.status
+          } catch (error) {
+            console.warn('[meshtastic] Unable to decode', packet.portName, String(error))
+          }
+        }
       }
 
       let originalNodeRecord = nodes.value.find((n) => n.num == updates.num)
 
       let updatedNode = nodes.upsert(updates)
-      packets.push(copy(e))
+      packets.push(packet)
+      if (alertMessage) packets.upsert({ id: e.id, message: alertMessage })
 
       // Check and send trace route if needed
+      // NOTE: `originalNodeRecord` is the stored record, which the upsert above has already updated, so the
+      // hop-change comparison never differs and traceroutes are only sent when a route is missing. Likewise
+      // `updates.trace` is assigned after the upsert and only reaches nodes seen for the first time.
+      // Left as is: correcting either would send noticeably more traceroutes over the mesh.
       if (updates.hopsAway == 0) updates.trace = null
       else if (automaticTraceroutes.value && updatedNode?.position?.latitudeI && updates.hopsAway && (!updatedNode.trace || originalNodeRecord?.hopsAway != updates.hopsAway)) {
         if (isTracerouteAvailable(updates.num)) traceRoute(updates.num)
@@ -300,6 +362,7 @@ export async function connect(address?: string) {
   /** MyNodeInfo ID on Connection */
   connection.events.onMyNodeInfo.subscribe((e) => {
     myNodeNum.set(e.myNodeNum)
+    myNodeInfo.set(copy(e))
   })
 
   connection.events.onDeviceMetadataPacket.subscribe((e) => {
@@ -431,7 +494,9 @@ export async function connect(address?: string) {
 
   connection.events.onFromRadio.subscribe((e) => {
     updateTimeout()
-    lastFromRadio.set(copy(e))
+    // Clients only use this to show progress while the device is being configured
+    if (connectionStatus.value != 'connected') lastFromRadio.set(Date.now())
+    handleFromRadioVariant(e)
   })
 
   /** TRACEROUTE_APP */
@@ -464,7 +529,7 @@ export async function connect(address?: string) {
     if (id) packets.upsert({ id, neighbors: data?.neighbors || [] })
     if (data?.neighbors) {
       for (let neighbor of data.neighbors) {
-        nodes.upsert({ num: neighbor.nodeId, snr: neighbor.snr, lastHeard: Date.now() / 1000 })
+        nodes.upsert({ num: neighbor.nodeId, snr: neighbor.snr, lastHeard: neighbor.lastRxTime || Date.now() / 1000 })
       }
     }
   })
@@ -513,8 +578,13 @@ export function traceRoute(destination: number) {
 
 let queueProcessing = false
 async function processTraceRoutes() {
-  queueProcessing = true
   let destination = pendingTraceroutes.value[0]
+  if (destination == undefined || connectionStatus.value != 'connected') {
+    queueProcessing = false
+    if (pendingTraceroutes.value.length) pendingTraceroutes.set([])
+    return
+  }
+  queueProcessing = true
   console.log('[meshtastic] Sending Traceroute for', destination)
   packets.push({
     from: myNodeNum.value,
@@ -523,7 +593,7 @@ async function processTraceRoutes() {
     channel: '',
     data: { $typeName: 'RouteRequest' }
   } as any)
-  connection.traceRoute(destination)
+  connection.traceRoute(destination).catch((e) => console.log('[meshtastic] Traceroute to', destination, 'was not acknowledged', e?.error ?? String(e)))
   pendingTraceroutes.shift()
   setTimeout(() => {
     pendingTraceroutes.value.length ? processTraceRoutes() : (queueProcessing = false)
@@ -641,7 +711,7 @@ export async function setPosition(position: Position) {
   }
 
   if (deviceConfig['position']) {
-    let value = { ...deviceConfig['position'], gpsMode: gpsModes[deviceConfig['position']?.gpsMode], fixedPosition: false }
+    let value = { ...deviceConfig['position'], gpsMode: gpsModes[deviceConfig['position']?.gpsMode] ?? deviceConfig['position']?.gpsMode, fixedPosition: false }
     console.log('Sending Config Position', value)
     connection.setConfig({ payloadVariant: { case: 'position', value } } as Protobuf.Config.Config)
   }
@@ -652,12 +722,12 @@ export async function setPosition(position: Position) {
 
   await sleep(500)
   if (deviceConfig['position']) {
-    let value = { ...deviceConfig['position'], gpsMode: gpsModes[deviceConfig['position']?.gpsMode], fixedPosition: true }
+    let value = { ...deviceConfig['position'], gpsMode: gpsModes[deviceConfig['position']?.gpsMode] ?? deviceConfig['position']?.gpsMode, fixedPosition: true }
     console.log('Sending Config Position', value)
     connection.setConfig({ payloadVariant: { case: 'position', value } } as Protobuf.Config.Config)
   }
 
-  deviceConfig.position.fixedPosition = true
+  if (deviceConfig.position) deviceConfig.position.fixedPosition = true
 }
 
 /** This is currently clearing position */

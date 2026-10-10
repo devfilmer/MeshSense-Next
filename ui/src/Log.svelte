@@ -1,7 +1,7 @@
 <script lang="ts">
   import { broadcastId, channels, myNodeNum, nodes, packets, version, type MeshPacket } from 'api/src/vars'
   import Card from './lib/Card.svelte'
-  import { getNodeById, getNodeName, getNodeNameById, scrollToBottom, testPacket } from './lib/util'
+  import { getNodeById, getNodeName, getNodeNameById, getRelayName, getTransportLabel, scrollToBottom, summarizeTelemetry, testPacket } from './lib/util'
   import Modal from './lib/Modal.svelte'
   import { messageDestination } from './Message.svelte'
   import OpenLayersMap from './lib/OpenLayersMap.svelte'
@@ -13,7 +13,7 @@
     if (filterText) {
       if (!(getNodeNameById(packet.from).toLowerCase().includes(filterText.toLowerCase()) || getNodeNameById(packet.to).toLowerCase().includes(filterText.toLowerCase()))) return false
     }
-    if (!includeTx && packet.from == $myNodeNum && !packet.data && !packet.message) return false
+    if (!includeTx && packet.from == $myNodeNum && !packet.data && !packet.message && !packet.notification) return false
     if (!includeTx && packet.data?.$typeName == 'meshtastic.Telemetry' && packet.from == $myNodeNum) return false
     if (!includeTx && packet.data?.$typeName == 'meshtastic.Routing') return false
     return true
@@ -60,10 +60,19 @@
     }
   }
 
+  const dateFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'numeric', hour: 'numeric', minute: 'numeric' })
+
+  function formatTime(seconds: number) {
+    return seconds ? dateFormat.format(seconds * 1000) : ''
+  }
+
   function getType(packet: MeshPacket) {
     if (packet.payloadVariant?.case == 'encrypted') return 'Encrypted'
-    if (packet.message) return 'Message'
-    return (packet.data?.variant?.value?.$typeName ?? packet.data?.$typeName)?.replace('meshtastic.', '')
+    if (packet.notification) return 'Notification'
+    if (packet.message) return packet.message.alert ? 'Alert' : 'Message'
+    let typeName = packet.data?.variant?.value?.$typeName ?? packet.data?.$typeName
+    // Ports without a decoded payload are identified by their port name
+    return typeName ? typeName.replace('meshtastic.', '') : (packet.portName?.replace(/_APP$/, '') ?? '')
   }
 
   function showPin(packet: MeshPacket) {
@@ -71,7 +80,7 @@
     let description = getNodeName(node)
     let icon = getSvgUri(String(node.num))
     if (packet.rxTime) {
-      description += ' (' + new Date(packet.rxTime * 1000).toLocaleString(undefined, { day: 'numeric', month: 'numeric', hour: 'numeric', minute: 'numeric' }) + ')'
+      description += ' (' + formatTime(packet.rxTime) + ')'
     }
     let lat = packet.data.latitudeI / 10000000
     let long = packet.data.longitudeI / 10000000
@@ -99,10 +108,10 @@
     <div class="w-52"></div>
   </h2>
   <div bind:this={packetsDiv} class="p-1 px-2 text-sm overflow-auto grid h-full content-start overflow-x-hidden">
-    {#each $packets.filter((p) => shouldPacketBeShown(p, includeTx, filterText)) || [] as packet}
+    {#each $packets.filter((p) => shouldPacketBeShown(p, includeTx, filterText)) || [] as packet (packet)}
       {#if !messagesOnly || packet.message?.show}
         <div class="flex gap-2 whitespace-nowrap {($highlightOwnNode && packet.from === $myNodeNum) ? 'text-white/90' : ''}">
-          <div class="w-28">{packet.rxTime ? new Date(packet.rxTime * 1000).toLocaleString(undefined, { day: 'numeric', month: 'numeric', hour: 'numeric', minute: 'numeric' }) : ''}</div>
+          <div class="w-28">{formatTime(packet.rxTime)}</div>
 
           <!-- Nodes -->
           <div class="w-44 flex gap-1 overflow-hidden">
@@ -116,22 +125,44 @@
             {/if}
           </div>
           <div class="w-7">{packet.channel}</div>
-          <div class="w-10">{packet.hopStart == packet.hopLimit ? packet.rxSnr || '' : ''}{packet.viaMqtt ? 'MQTT' : ''}</div>
+          <div class="w-10">{packet.hopStart == packet.hopLimit ? packet.rxSnr || '' : ''}{getTransportLabel(packet)}</div>
           <div class="w-10">{packet.hopStart == packet.hopLimit ? packet.rxRssi || '' : ''}</div>
           <div class="w-36">{getType(packet)}</div>
 
-          <div class="w-10">
+          <div class="w-10" title={packet.relayNode ? `Relayed by ${getRelayName(packet.relayNode)}` : ''}>
             {#if packet.hopStart}{packet.hopStart - packet.hopLimit} / {packet.hopStart}{/if}
           </div>
-          <div class="w-8">
+          <div class="w-14 flex gap-0.5">
             <button on:click={() => (selectedPacket = packet)}>🔍</button>
             {#if packet.data?.$typeName == 'meshtastic.Position'}
               <button title="Fly To" on:click={() => showPin(packet)}>🌐</button>
+            {/if}
+            {#if packet.xeddsaSigned}
+              <span title="Signature verified (XEdDSA)" class="cursor-help">🔏</span>
+            {/if}
+            {#if packet.pkiEncrypted}
+              <span title="Encrypted with public key (PKI)" class="cursor-help">🔒</span>
             {/if}
           </div>
           {#if packet.data?.variant?.case == 'deviceMetrics'}
             <div class="bg-green-500/20 rounded px-1 my-0.5 text-xs ring-0 text-green-200 mx-2 w-fit">
               {Number(packet.data?.variant?.value?.voltage).toFixed(1)}V {packet.data?.variant?.value?.batteryLevel}%
+            </div>
+          {:else if packet.data?.$typeName == 'meshtastic.Telemetry' && packet.data?.variant?.case}
+            <div class="bg-green-500/20 rounded px-1 my-0.5 text-xs ring-0 text-green-200 mx-2 w-fit">
+              {summarizeTelemetry(packet.data.variant)}
+            </div>
+          {:else if packet.notification}
+            <div class="bg-amber-700/40 rounded px-1 my-0.5 text-xs ring-0 text-amber-100 mx-2 w-fit">
+              {packet.notification.message}
+            </div>
+          {:else if packet.data?.$typeName == 'meshtastic.StatusMessage'}
+            <div class="bg-sky-800/60 rounded px-1 my-0.5 text-xs ring-0 text-sky-100 mx-2 w-fit">
+              {packet.data.status}
+            </div>
+          {:else if packet.portName == 'MESH_BEACON_APP' && packet.data}
+            <div class="bg-sky-800/60 rounded px-1 my-0.5 text-xs ring-0 text-sky-100 mx-2 w-fit">
+              {packet.data.message}{packet.data.offerChannel?.name ? ` (offers channel ${packet.data.offerChannel.name})` : ''}
             </div>
           {:else if packet.data?.$typeName == 'meshtastic.Position'}
             <div class="bg-teal-800/60 rounded px-1 my-0.5 text-xs ring-0 text-teal-200 mx-2 w-fit">
@@ -161,6 +192,7 @@
           {#if packet.to == broadcastId}
             <button on:click={() => ($messageDestination = packet.channel)} class="font-bold text-white">{channels.value[packet.channel]?.settings?.name || 'Primary'}</button>
           {/if}
+          {#if packet.message.alert}<span title="Alert">🔔</span>{/if}
           <button class="font-bold" on:click={() => ($messageDestination = packet.from)}>{getNodeNameById(packet.from)}:</button>
           {packet.message.readable ?? packet.message.data}
         </div>

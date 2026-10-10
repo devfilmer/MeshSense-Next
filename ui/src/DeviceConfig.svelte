@@ -1,7 +1,6 @@
 <script lang="ts">
   import axios from 'axios'
   import { onDestroy, onMount } from 'svelte'
-  import { userKey } from './lib/util'
 
   let deviceConfig = {}
   let keys = []
@@ -9,7 +8,7 @@
 
   async function getConfig() {
     try {
-      deviceConfig = (await axios.get('/deviceConfig', { params: { accessKey: $userKey } })).data
+      deviceConfig = (await axios.get('/deviceConfig')).data
       keys = Object.keys(deviceConfig).sort()
     } catch (e) {
       console.error(e)

@@ -5,14 +5,16 @@ export let headless = new State('headless', '')
 export let address = new State('address', '', { persist: 'api' })
 export let connectionStatus = new State<'connected' | 'connecting' | 'disconnected' | 'searching' | 'configuring' | 'reconnecting'>('connectionStatus', 'disconnected')
 export let lastFromRadio = new State('lastFromRadio', undefined, { hideLog: true })
-export let channels = new State<Channel[]>('channels', [], { primaryKey: 'index', hideLog: true })
+export let channels = new State<Channel[]>('channels', [], { primaryKey: 'index', hideLog: true, redact: ['psk'] })
 export let packets = new State<MeshPacket[]>('packets', [], { hideLog: true })
 export let nodes = new State<NodeInfo[]>('nodes', [], { primaryKey: 'num', hideLog: true })
 export let currentTime = new State<number>('currentTime', Date.now(), { hideLog: true })
 export let myNodeNum = new State<number>('myNodeNum')
 export let broadcastId = 4294967295
 export let myNodeMetadata = new State<DeviceMetadata>('myNodeMetadata')
-export let accessKey = new State<string>('accessKey', undefined, { persist: true, hideLog: true })
+export let myNodeInfo = new State<MyNodeInfo>('myNodeInfo')
+export let lockdownStatus = new State<LockdownStatus>('lockdownStatus')
+export let accessKey = new State<string>('accessKey', undefined, { persist: true, hideLog: true, private: true })
 export let packetLimit = new State<number>('packetLimit', 500, { persist: true })
 export let apiHostname = new State<string>('apiHostname', undefined, { hideLog: true })
 export let apiPort = new State<string>('apiPort', undefined, { hideLog: true })
@@ -41,6 +43,27 @@ export type DeviceMetadata = {
   positionFlags: number
   hwModel: string
   hasRemoteHardware: boolean
+  hasPKC?: boolean
+  excludedModules?: number
+  hasXeddsa?: boolean
+}
+
+export type MyNodeInfo = {
+  myNodeNum: number
+  rebootCount: number
+  minAppVersion: number
+  pioEnv?: string
+  firmwareEdition?: number
+  nodedbCount?: number
+}
+
+export type LockdownStatus = {
+  state: number
+  stateName: string
+  lockReason?: string
+  bootsRemaining?: number
+  validUntilEpoch?: number
+  backoffSeconds?: number
 }
 
 export type Message = {
@@ -52,6 +75,7 @@ export type Message = {
   channel: number
   data: string
   show?: boolean
+  alert?: boolean
   decoded?: string
   readable?: string
 }
@@ -64,6 +88,8 @@ export type User = {
   hwModel: string
   isLicensed: boolean
   role: number
+  publicKey?: string
+  isUnmessagable?: boolean
 }
 
 export type Position = {
@@ -106,6 +132,8 @@ export type EnvironmentMetrics = {
   barometricPressure: number
   gasResistance: number
   iaq: number
+  lightningStrikeCount1h?: number
+  lightningDistanceKm?: number
 }
 
 export type NodeInfo = {
@@ -116,6 +144,13 @@ export type NodeInfo = {
   viaMqtt: boolean
   hopsAway: number
   isFavorite: boolean
+  isIgnored?: boolean
+  isMuted?: boolean
+  isKeyManuallyVerified?: boolean
+  /** A packet carrying a valid XEdDSA signature has been received from this node */
+  hasXeddsaSigned?: boolean
+  /** Latest NODE_STATUS_APP message */
+  status?: string
   user: User
   position: Position
   deviceMetrics?: DeviceMetrics
@@ -172,6 +207,14 @@ export type MeshPacket = {
   hopStart: number
   publicKey?: string
   pkiEncrypted?: boolean
+  nextHop?: number
+  relayNode?: number
+  transportMechanism?: number
+  xeddsaSigned?: boolean
+  /** Name of the application port, e.g. `TELEMETRY_APP` */
+  portName?: string
+  /** Notice raised by the connected device itself */
+  notification?: { level: number; message: string; time: number }
   data?: any
   message?: Message
   deviceMetrics?: DeviceMetrics

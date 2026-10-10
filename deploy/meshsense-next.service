@@ -1,0 +1,36 @@
+# MeshSense Next as a system service: the headless API plus the web UI on port 5920.
+# Install with deploy/install-service.sh, which fills in __USER__, __REPO__ and __NODE__.
+#
+# State (settings, access key, node address, routes, lastLog.txt) lives in
+# /var/lib/meshsense-next/meshsense; env-paths honours XDG_DATA_HOME.
+# Change the node address and access key in the web UI; they persist across restarts.
+# Setting ADDRESS or ACCESS_KEY in the environment (a drop-in) overwrites the stored
+# value on every start, so use one place or the other, not both.
+# Put a secret in a root-only file, not in Environment= (systemctl show lists those):
+#   sudo install -m 600 -o root -g root /dev/null /etc/meshsense-next.env
+#   (add ACCESS_KEY=... to it), then: sudo systemctl edit meshsense-next
+#   and add the line EnvironmentFile=/etc/meshsense-next.env under [Service].
+
+[Unit]
+Description=MeshSense Next (Meshtastic network monitor)
+Documentation=https://github.com/devfilmer/MeshSense-Next
+After=network-online.target bluetooth.service
+Wants=network-online.target bluetooth.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REPO__/api
+ExecStart=__NODE__ __REPO__/api/dist/index.cjs
+Environment=PORT=5920
+Environment=XDG_DATA_HOME=/var/lib/meshsense-next
+StateDirectory=meshsense-next
+StateDirectoryMode=0750
+Restart=always
+RestartSec=5
+SyslogIdentifier=meshsense-next
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

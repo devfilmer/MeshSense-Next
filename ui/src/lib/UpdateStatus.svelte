@@ -27,7 +27,7 @@
 
   function installUpdate() {
     status = 'Installing Update'
-    if ($headless) status += '. Please manually restart MeshSense when in headless mode.'
+    if ($headless) status += '. Please manually restart MeshSense Next when in headless mode.'
     tick().then(() => {
       axios.get('/installUpdate', { timeout: 500 })
     })

@@ -19,7 +19,7 @@
   import Channels from './Channels.svelte'
 </script>
 
-<Modal title="MeshSense" bind:visible={$showConfigModal}>
+<Modal title="MeshSense Next" bind:visible={$showConfigModal}>
   <div class="grid grid-rows-[auto_1fr] gap-2">
     <!-- Sidebar -->
     <div class="flex gap-1 -m-2 px-2 p-2 flex-wrap items-center border-b border-black/20 to-black/10 bg-gradient-to-b from-transparent">
@@ -39,7 +39,7 @@
         <div class="flex flex-col gap-4">
           <div class="font-bold">Usage Warranty</div>
           <div class="font-mono">Affirmatech, Inc. disclaims all liability for damages (consequential and otherwise) arising from the use of this product. No other warranty is given.</div>
-          <div class="font-bold">MeshSense uses the Meshtastic Javascript library which is licensed under GPL-3 as follows:</div>
+          <div class="font-bold">MeshSense Next is based on <a target="_blank" rel="noopener" href="https://github.com/Affirmatech/MeshSense">MeshSense</a> by Affirmatech, Inc. and, like it, uses the Meshtastic Javascript library which is licensed under GPL-3 as follows:</div>
           <pre class="overflow-auto h-80 rounded ring bg-black/20 mr-10 p-4">{license}</pre>
           <div>For requests related to the GPL, please <a href="https://affirmatech.com/contact?product=MeshSense">contact us</a> and we will accomodate your request.</div>
         </div>

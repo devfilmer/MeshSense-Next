@@ -18,8 +18,19 @@ process.on('uncaughtException', (error: any) => {
 let apiProcess: Electron.UtilityProcess
 let apiPort: any = 9999
 
+/**
+ * MeshSense Next is a separate build from MeshSense, but the updater is still configured for
+ * Affirmatech's release feed; checking it would offer (and install) upstream MeshSense releases.
+ * Update checks stay off until this project publishes its own feed.
+ */
+const updateChecksEnabled = false
+
 /** asnyc needed for updateCheckLoop to allow electron to launch main window */
 async function updateCheckLoop() {
+  if (!updateChecksEnabled) {
+    console.log('[electron] Update checks are disabled')
+    return
+  }
   console.log('[electron] Checking for updates on channel', autoUpdater.channel)
   autoUpdater.checkForUpdates()
   setInterval(() => {
@@ -98,7 +109,9 @@ app.whenReady().then(async () => {
 
   apiProcess.on('message', (e) => {
     console.log('[api to electron]', e)
-    if (e.event == 'installUpdate') {
+    if (!updateChecksEnabled && ['installUpdate', 'checkUpdate'].includes(e.event)) {
+      console.log('[electron] Ignoring', e.event, '- update checks are disabled')
+    } else if (e.event == 'installUpdate') {
       autoUpdater.autoRunAppAfterInstall = !headless
       autoUpdater.quitAndInstall()
     } else if (e.event == 'checkUpdate') autoUpdater.checkForUpdates()

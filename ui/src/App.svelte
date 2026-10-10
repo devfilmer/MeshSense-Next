@@ -62,7 +62,8 @@
       <Map class={$expandedMap ? 'row-span-full col-span-full' : ''} bind:ol />
     {:else}
       <div class="grid items-center px-5 m-auto">
-        <div class="text-3xl font-bold text-white">Welcome to MeshSense!</div>
+        <div class="text-3xl font-bold text-white">Welcome to MeshSense Next!</div>
+        <div class="text-sm text-white/50 mt-1">Based on <a target="_blank" rel="noopener" href="https://affirmatech.com/meshsense">MeshSense</a> by Affirmatech</div>
         <div class="max-w-md mt-5 flex flex-col gap-4">
           <div>Available bluetooth devices will appear on the left</div>
           <div>If your device is on the network, enter it's IP address in the Device IP field and click Connect.</div>
@@ -77,7 +78,7 @@
           </div>
         </div>
         <div class="font-normal absolute m-2 top-0 right-0 flex gap-2 items-center">
-          <div class="text-xs text-white/50 pr-2 font-bold">MeshSense {$version}</div>
+          <div class="text-xs text-white/50 pr-2 font-bold">MeshSense Next {$version}</div>
           <button class="btn btn-sm h-6 grid place-content-center" on:click={() => newsVisible.set(true)}>📰</button>
           <button class="btn btn-sm h-6 grid place-content-center" on:click={() => showPage('Settings')}>⚙</button>
         </div>

@@ -1,5 +1,4 @@
 import { app, Menu, BrowserWindow } from 'electron'
-import { autoUpdater } from 'electron-updater'
 
 export function buildMenu() {
   if (process.platform !== 'darwin') return
@@ -12,13 +11,6 @@ export function buildMenu() {
           label: 'About',
           role: 'about'
         },
-        {
-          label: 'Check for Updates...',
-          click: () => {
-            autoUpdater.checkForUpdates()
-          }
-        },
-        { type: 'separator' },
         {
           label: 'Settings...',
           accelerator: 'CmdOrCtrl+,',

@@ -75,7 +75,6 @@ export class WebSocketHTTPServer extends WebSocketServer {
   processIncomingMessage(message: any, socket: WebSocket.WebSocket) {
     try {
       let messageObject: MessageObject = JSON.parse(message)
-      console.log('[WSS]', socket['remoteAddress'], messageObject?.data)
       try {
         if (messageObject.event) this.msg.emit(messageObject.event, messageObject.data, socket)
       } catch (e) {

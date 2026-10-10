@@ -1,7 +1,7 @@
 <script lang="ts">
   import axios from 'axios'
   import { onDestroy, onMount, tick } from 'svelte'
-  import { scrollToBottom, userKey } from './lib/util'
+  import { scrollToBottom } from './lib/util'
   import { AnsiUp } from 'ansi_up'
 
   let ansi = new AnsiUp()
@@ -13,7 +13,7 @@
 
   async function getLog() {
     try {
-      log = (await axios.get('/consoleLog', { params: { accessKey: $userKey } })).data
+      log = (await axios.get('/consoleLog')).data
       // console.log(typeof log)
     } catch (e) {
       console.error(e)
