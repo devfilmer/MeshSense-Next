@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { connectionStatus, address, enableTLS, lastFromRadio, lockdownStatus } from 'api/src/vars'
+  import { connectionStatus, address, enableTLS, lastFromRadio, lockdownStatus, nodes, myNodeNum, showNodeNameInAddress, bluetoothInfo, currentTime, radioName, configProgress } from 'api/src/vars'
   import Card from './lib/Card.svelte'
   import { smallMode } from './Nodes.svelte'
-  import { hasAccess } from './lib/util'
+  import { hasAccess, connectionStatusMessage, bluetoothDetails, configProgressLines } from './lib/util'
   import axios from 'axios'
 
   let connectionIcons = {
@@ -27,6 +27,12 @@
   $: if ($lastFromRadio && $connectionStatus == 'configuring') spinnerAngle = (spinnerAngle + 8) % 360
 
   /** Lockdown states in which the device withholds data until it is unlocked */
+  /** Short name of the connected device, shown with its address once it is connected */
+  $: deviceName = $nodes.find((n) => n.num == $myNodeNum)?.user?.shortName || ''
+  $: addressLabel = $showNodeNameInAddress && deviceName && $connectionStatus != 'disconnected' ? `${deviceName} (${$address})` : $address
+
+  $: busyMessage = connectionStatusMessage($connectionStatus, $address, $radioName, $configProgress)
+
   $: lockdownNotice = ['NEEDS_PROVISION', 'LOCKED', 'UNLOCK_FAILED'].includes($lockdownStatus?.stateName) ? $lockdownStatus : undefined
 </script>
 
@@ -43,8 +49,16 @@
   <form on:submit|preventDefault={connect} class="grid {$smallMode ? 'grid-cols-1' : 'grid-cols-[1fr_auto]'} p-2 gap-1 items-center text-sm">
     <!-- Icon and Input -->
     <div class="flex gap-2 items-center">
-      {connectionIcons[$connectionStatus]}
-      <input disabled={$connectionStatus != 'disconnected'} size="3" class="input w-full" type="text" bind:value={$address} placeholder="Device IP" />
+      {#if busyMessage}
+        <div class="animate-spin rounded-full h-4 w-4 border-2 border-yellow-300 border-t-transparent" role="status" aria-label="Connecting"></div>
+      {:else}
+        {connectionIcons[$connectionStatus]}
+      {/if}
+      {#if $connectionStatus == 'disconnected'}
+        <input size="3" class="input w-full" type="text" bind:value={$address} placeholder="Device IP" />
+      {:else}
+        <div class="input w-full truncate" title={addressLabel}>{addressLabel}</div>
+      {/if}
     </div>
     <!-- Cancel Button -->
     {#if $hasAccess}
@@ -61,6 +75,17 @@
       {/if}
     {/if}
   </form>
+  {#if busyMessage}
+    <div class="flex items-center gap-2 text-xs text-yellow-200 px-2 pb-2">
+      <div class="animate-spin rounded-full h-3 w-3 border-2 border-yellow-200 border-t-transparent" role="status" aria-label="Working"></div>
+      {busyMessage}
+    </div>
+    <div class="text-xs text-white/60 px-2 pb-2 grid gap-0.5">
+      {#each [...bluetoothDetails($bluetoothInfo, $address, $currentTime), ...configProgressLines($configProgress)] as line}
+        <div>{line}</div>
+      {/each}
+    </div>
+  {/if}
   {#if lockdownNotice}
     <div class="text-xs bg-amber-700/40 text-amber-100 rounded m-2 mt-0 p-1.5">
       Device lockdown: <span class="font-bold">{lockdownNotice.stateName.replace('_', ' ').toLowerCase()}</span>

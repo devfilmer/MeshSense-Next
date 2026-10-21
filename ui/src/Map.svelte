@@ -30,11 +30,11 @@
 </script>
 
 <script lang="ts">
-  import { connectionStatus, myNodeNum, version, type NodeInfo } from 'api/src/vars'
+  import { address, bluetoothInfo, radioName, configProgress, connectionStatus, currentTime, myNodeNum, version, type NodeInfo } from 'api/src/vars'
   import { filteredNodes, isInactive, nodeVisibilityMode } from './Nodes.svelte'
   import Card from './lib/Card.svelte'
   import OpenLayersMap from './lib/OpenLayersMap.svelte'
-  import { getCoordinates, getNodeById, getNodeName, getNodeNameById, setPosition } from './lib/util'
+  import { getCoordinates, getNodeById, getNodeName, getNodeNameById, setPosition, connectionStatusMessage, bluetoothDetails, configProgressLines } from './lib/util'
   import { showConfigModal, showPage } from './SettingsModal.svelte'
   import { newsVisible } from './News.svelte'
   import { onDestroy } from 'svelte'
@@ -131,6 +131,17 @@
     }}
     onDarkModeToggle={plotData}
   ></OpenLayersMap>
+  {#if connectionStatusMessage($connectionStatus, $address, $radioName, $configProgress)}
+    <div class="absolute inset-0 grid place-content-center pointer-events-none">
+      <div class="bg-black/70 text-white rounded-lg px-4 py-3 text-sm flex items-center gap-3 max-w-md">
+        <div class="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-yellow-300 shrink-0" role="status" aria-label="Working"></div>
+        <div>{connectionStatusMessage($connectionStatus, $address, $radioName, $configProgress)}</div>
+        {#each [...bluetoothDetails($bluetoothInfo, $address, $currentTime), ...configProgressLines($configProgress)] as line}
+          <div class="text-xs text-white/60">{line}</div>
+        {/each}
+      </div>
+    </div>
+  {/if}
   {#if $setPositionMode}
     <div class="absolute select-none top-10 left-10 bg-indigo-600/80 text-white p-3 py-1 rounded-lg">
       Click on a new position for {getNodeNameById($myNodeNum)}

@@ -317,3 +317,34 @@ export function formatTemp(tempC: number, displayFahrenheit?: boolean) {
   if (displayFahrenheit) return Math.round((tempC * 9) / 5 + 32) + '  °F'
   return Math.round(tempC) + '  °C'
 }
+
+/** Text explaining why the radio connection is busy, or undefined when it is idle or connected */
+export function connectionStatusMessage(status: string, address: string, name?: string, progress?: any) {
+  let device = name && address ? `${name} (${address})` : address || 'the radio'
+  switch (status) {
+    case 'searching': return `Scanning for ${device} over Bluetooth. Device not found yet.`
+    case 'connecting': return `Connecting to ${device} over Bluetooth…`
+    case 'configuring': return `Connected to ${device}. ${progress?.stage || 'Loading nodes'}…`
+    case 'reconnecting': return `Connection to ${device} was lost. Reconnecting…`
+    default: return undefined
+  }
+}
+
+/** Plain-language details about the Bluetooth scanner, for the address box and map */
+export function bluetoothDetails(info: any, address: string, now: number): string[] {
+  if (!info) return []
+  let lines: string[] = [info.adapterAvailable ? 'Bluetooth adapter ready' : 'No Bluetooth adapter found']
+  if (info.targetPaired === false) lines.push('Not paired with this device. Pair the radio in the Pi Bluetooth settings first (Meshtastic default PIN is 123456).')
+  if (info.lastScanAt) lines.push(`Last scan ${Math.max(0, Math.round((now - info.lastScanAt) / 1000))} s ago, ${info.devicesSeen} devices seen since start`)
+  lines.push(info.targetSeenAt ? `${address} seen ${Math.max(0, Math.round((now - info.targetSeenAt) / 1000))} s ago` : `${address} not seen since start`)
+  if (info.targetRssi != undefined) lines.push(`Bluetooth signal ${info.targetRssi} dBm`)
+  if (info.staleLinkCleared) lines.push('Cleared an old Bluetooth link to the radio')
+  if (info.lastError) lines.push(`Last error: ${info.lastError}`)
+  return lines
+}
+
+/** Counts of what the radio has sent so far while it is being read */
+export function configProgressLines(progress: any): string[] {
+  if (!progress || !progress.stage) return []
+  return [`Nodes read: ${progress.nodes}`, `Channels read: ${progress.channels}`, `Settings read: ${progress.configs}`, `Module settings read: ${progress.modules}`]
+}

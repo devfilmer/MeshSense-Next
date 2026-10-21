@@ -35,6 +35,7 @@ export class BleConnection extends MeshDevice {
   private fromNumCharacteristic: BluetoothRemoteGATTCharacteristic | undefined;
 
   private timerUpdateFromRadio: NodeJS.Timeout | null = null;
+  private readingFromRadio = false;
 
   constructor(configId?: number) {
     super(configId);
@@ -103,6 +104,10 @@ export class BleConnection extends MeshDevice {
 
     /** Setup event listners */
     this.device.addEventListener("gattserverdisconnected", () => {
+      if (this.timerUpdateFromRadio) {
+        clearInterval(this.timerUpdateFromRadio);
+        this.timerUpdateFromRadio = null;
+      }
       this.log.info(
         Types.Emitter[Types.Emitter.Connect],
         "Device disconnected",
@@ -228,6 +233,8 @@ export class BleConnection extends MeshDevice {
    * @throws Error if reading fails
    */
   protected async readFromRadio(): Promise<void> {
+    if (this.readingFromRadio || !this.device?.gatt?.connected || !this.fromRadioCharacteristic) return;
+    this.readingFromRadio = true;
     try {
       let hasMoreData = true;
       while (hasMoreData && this.fromRadioCharacteristic) {
@@ -240,15 +247,18 @@ export class BleConnection extends MeshDevice {
 
         await this.handleFromRadio(new Uint8Array(value.buffer));
         this.updateDeviceStatus(Types.DeviceStatusEnum.DeviceConnected);
+        // The native read blocks the process; let pending network and timer work run between reads
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     } catch (error) {
       this.log.error(
         Types.Emitter[Types.Emitter.ReadFromRadio],
         `❌ ${error instanceof Error ? error.message : "Unknown error"}`,
       );
+      if (!this.device?.gatt?.connected) return; // link is gone; the disconnect handler reports it
       throw error; // Re-throw to let caller handle
     } finally {
-      // this.pendingRead = false;
+      this.readingFromRadio = false;
     }
   }
 

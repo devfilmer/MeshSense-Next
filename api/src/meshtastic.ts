@@ -25,6 +25,7 @@ import {
   myNodeNum,
   nodes,
   packetLimit,
+  configProgress,
   packets,
   pendingTraceroutes,
   tracerouteRateLimit,
@@ -45,7 +46,7 @@ let connectionIntended = false
 /** Tracks when nodes were last requested a traceroute: `traceRouteLog[nodeNum]` */
 let traceRouteLog: Record<number, number> = {}
 
-let globalTracerouteRateLimitSec = 60
+let globalTracerouteRateLimitSec = 600
 
 if (tracerouteRateLimit.value < 15) tracerouteRateLimit.set(15)
 
@@ -66,10 +67,35 @@ function uploadMyNode() {
   sendToMeshMap(node, node)
 }
 
+/** Packet ids the device replayed from its stored history (firmware 2.8). They update nodes but are not log rows. */
+const replayedPacketIds = new Set<number>()
+const REPLAY_AGE_SECONDS = 600
+
+function isReplayedPacket(rxTime?: number) {
+  return !!rxTime && Date.now() / 1000 - rxTime > REPLAY_AGE_SECONDS
+}
+
+/** Store a packet in the log unless it is a replay. Returns the stored record, or the update when not stored. */
+function upsertPacket(update: any) {
+  if (update.id != undefined && replayedPacketIds.has(update.id)) return update
+  return packets.upsert(update)
+}
+
+/** Last upload time per node, so each node is posted at most once per interval */
+const meshMapLastPost = new Map<number, number>()
+const MESHMAP_MIN_INTERVAL_MS = 10 * 60 * 1000
+
 function sendToMeshMap(updates: Partial<NodeInfo & { name?: string }>, node?: NodeInfo, packet?: MeshPacket) {
   if (connectionStatus.value == 'connected' && meshMapForwarding.value) {
     // Packets replayed from the device's stored history are not current observations
-    if (packet?.rxTime && Date.now() / 1000 - packet.rxTime > 600) return
+    if (isReplayedPacket(packet?.rxTime)) return
+    // Throttle: one upload per node every ten minutes; the rest are dropped
+    const nodeNum = updates.num ?? packet?.from
+    if (nodeNum != undefined) {
+      const last = meshMapLastPost.get(nodeNum) ?? 0
+      if (Date.now() - last < MESHMAP_MIN_INTERVAL_MS) return
+      meshMapLastPost.set(nodeNum, Date.now())
+    }
     if (packet && packet.from != myNodeNum.value) updates.hopsAway = packet.hopStart - packet.hopLimit
     if (node && node.user?.shortName) updates.name = node.user?.shortName
     // console.log('MeshMap Send', updates)
@@ -201,6 +227,14 @@ function handleFromRadioVariant(fromRadio: Protobuf.Mesh.FromRadio) {
   }
 }
 
+/** Counts what the radio has sent during configuration, so the app can show progress */
+function setConfigStage(stage: string) {
+  configProgress.set({ ...configProgress.value, stage })
+}
+function countConfig(key: 'nodes' | 'channels' | 'configs' | 'modules') {
+  configProgress.set({ ...configProgress.value, [key]: configProgress.value[key] + 1 })
+}
+
 /** Disconnect from any existing connection */
 export async function disconnect(setIntent = true) {
   connectionStatus.set('disconnected')
@@ -217,6 +251,7 @@ export async function disconnect(setIntent = true) {
 export function reset() {
   nodes.set([])
   packets.set([])
+  configProgress.set({ stage: '', nodes: 0, channels: 0, configs: 0, modules: 0 })
   channels.set([])
   myNodeNum.set(undefined)
   myNodeMetadata.set(undefined)
@@ -271,6 +306,8 @@ export async function connect(address?: string) {
   connection.events.onDeviceStatus.subscribe(async (e) => {
     console.log('[meshtastic] Device Status', e)
     if (e == 6) {
+      configProgress.set({ stage: '', nodes: 0, channels: 0, configs: 0, modules: 0 })
+      setConfigStage('Reading device info')
       connectionStatus.set('configuring')
     } else if (e == 3) {
       connectionStatus.set('connecting')
@@ -344,8 +381,13 @@ export async function connect(address?: string) {
       let originalNodeRecord = nodes.value.find((n) => n.num == updates.num)
 
       let updatedNode = nodes.upsert(updates)
-      packets.push(packet)
-      if (alertMessage) packets.upsert({ id: e.id, message: alertMessage })
+      if (isReplayedPacket(e.rxTime)) {
+        if (replayedPacketIds.size > 5000) replayedPacketIds.clear()
+        replayedPacketIds.add(e.id)
+      } else {
+        packets.push(packet)
+        if (alertMessage) packets.upsert({ id: e.id, message: alertMessage })
+      }
 
       // Check and send trace route if needed
       // NOTE: `originalNodeRecord` is the stored record, which the upsert above has already updated, so the
@@ -361,6 +403,7 @@ export async function connect(address?: string) {
 
   /** MyNodeInfo ID on Connection */
   connection.events.onMyNodeInfo.subscribe((e) => {
+    setConfigStage('Reading device info')
     myNodeNum.set(e.myNodeNum)
     myNodeInfo.set(copy(e))
   })
@@ -371,6 +414,8 @@ export async function connect(address?: string) {
 
   /** NODEINFO_APP */
   connection.events.onNodeInfoPacket.subscribe((e) => {
+    setConfigStage('Reading nodes')
+    countConfig('nodes')
     let existingNode = nodes.value.find((n) => e.num == n.num)
     if (existingNode?.lastHeard > e.lastHeard) e.lastHeard = existingNode.lastHeard
     checkForCachedRoute(e as any)
@@ -381,7 +426,7 @@ export async function connect(address?: string) {
   connection.events.onUserPacket.subscribe((e) => {
     let { id, from, data } = copy(e)
     let packet: MeshPacket
-    if (id) packet = packets.upsert({ id, data })
+    if (id) packet = upsertPacket({ id, data })
     if (from) {
       let node = nodes.upsert({ num: from, user: data })
       if (packet?.viaMqtt === false) sendToMeshMap({ num: from, user: data }, node, packet)
@@ -393,7 +438,7 @@ export async function connect(address?: string) {
     let message = copy(e)
     message.show = true
     let packet: MeshPacket
-    packet = packets.upsert({ id: message.id, message })
+    packet = upsertPacket({ id: message.id, message })
     let node = getNodeById(packet.from)
     if (packet?.viaMqtt === false) sendToMeshMap({ num: message.from }, node, packet)
   })
@@ -402,7 +447,7 @@ export async function connect(address?: string) {
   connection.events.onTelemetryPacket.subscribe((e) => {
     let { id, data } = copy(e)
     let telemetry = extractPayload(data)
-    let packet = packets.upsert({ id, data })
+    let packet = upsertPacket({ id, data })
     let node = nodes.upsert({ num: e.from, ...telemetry })
     if (packet?.viaMqtt === false) sendToMeshMap({ num: e.from, ...telemetry }, node, packet)
   })
@@ -411,7 +456,7 @@ export async function connect(address?: string) {
   connection.events.onPositionPacket.subscribe((e) => {
     let { id, data } = copy(e)
     let packet: MeshPacket
-    if (id && data.latitudeI) packet = packets.upsert({ id, data })
+    if (id && data.latitudeI) packet = upsertPacket({ id, data })
     if (e.from && data.latitudeI) {
       let node = nodes.upsert({ num: e.from, position: data })
       if (packet?.viaMqtt === false) sendToMeshMap({ num: e.from, position: data }, node, packet)
@@ -421,21 +466,27 @@ export async function connect(address?: string) {
   /** DETECTION_SENSOR_APP */
   connection.events.onDetectionSensorPacket.subscribe((e) => {
     let { id, data } = copy(e)
-    packets.upsert({ id, detectionSensor: String(data) })
+    upsertPacket({ id, detectionSensor: String(data) })
   })
 
   /** onChannelPacket */
   connection.events.onChannelPacket.subscribe((e) => {
+    setConfigStage('Reading channels')
+    countConfig('channels')
     // Object.assign(deviceConfig, copy(e))
     // deviceConfig
     // console.log('CHANNEL', copy(e))
   })
 
   connection.events.onConfigPacket.subscribe((e) => {
+    setConfigStage('Reading settings')
+    countConfig('configs')
     Object.assign(deviceConfig, extractPayload(copy(e)))
   })
 
   connection.events.onModuleConfigPacket.subscribe((e) => {
+    setConfigStage('Reading module settings')
+    countConfig('modules')
     Object.assign(deviceConfig, extractPayload(copy(e)))
   })
 
@@ -503,7 +554,7 @@ export async function connect(address?: string) {
   connection.events.onTraceRoutePacket.subscribe((e) => {
     let { id, data } = copy(e)
     let packet: MeshPacket
-    if (id) packet = packets.upsert({ id, data })
+    if (id) packet = upsertPacket({ id, data })
     if (e.from && data) {
       let node = nodes.upsert({ num: e.from, trace: data })
       if (routeCache) routeCache.assign({ [e.from]: data })
@@ -520,13 +571,13 @@ export async function connect(address?: string) {
   /** ROUTING_APP */
   connection.events.onRoutingPacket.subscribe((e) => {
     let { id, data } = copy(e)
-    if (id) packets.upsert({ id, data })
+    if (id) upsertPacket({ id, data })
   })
 
   /** NEIGHBORINFO_APP */
   connection.events.onNeighborInfoPacket.subscribe((e) => {
     let { id, data } = copy(e)
-    if (id) packets.upsert({ id, neighbors: data?.neighbors || [] })
+    if (id) upsertPacket({ id, neighbors: data?.neighbors || [] })
     if (data?.neighbors) {
       for (let neighbor of data.neighbors) {
         nodes.upsert({ num: neighbor.nodeId, snr: neighbor.snr, lastHeard: neighbor.lastRxTime || Date.now() / 1000 })
@@ -542,7 +593,7 @@ export async function connect(address?: string) {
       message.show = true
       message.readable = message.decoded.replace(/[^\x20-\x7E]/g, '')
     }
-    packets.upsert({ id: message.id, message })
+    upsertPacket({ id: message.id, message })
   })
 
   // Attempt to connect to the specified MeshTastic Node

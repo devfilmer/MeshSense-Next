@@ -20,6 +20,7 @@
     messageSuffix,
     allowRemoteMessaging,
     autoConnectOnStartup,
+    showNodeNameInAddress,
     automaticTraceroutes,
     tracerouteRateLimit,
     nodeInactiveTimer,
@@ -130,6 +131,11 @@
     <label class="flex gap-2">
       <input type="checkbox" bind:checked={$autoConnectOnStartup} />
       <div class="font-bold">Connect to node on startup</div>
+    </label>
+
+    <label class="flex gap-2">
+      <input type="checkbox" bind:checked={$showNodeNameInAddress} />
+      <div class="font-bold">Show node name with address when connected</div>
     </label>
 
     <label class="flex gap-2">

@@ -1,5 +1,5 @@
 <script context="module" lang="ts">
-  import { currentTime, myNodeInfo, myNodeMetadata, myNodeNum, nodeInactiveTimer, nodes, pendingTraceroutes, type NodeInfo } from 'api/src/vars'
+  import { address, bluetoothInfo, radioName, configProgress, connectionStatus, currentTime, myNodeInfo, myNodeMetadata, myNodeNum, nodeInactiveTimer, nodes, pendingTraceroutes, type NodeInfo } from 'api/src/vars'
   export let smallMode = writable(false)
   export let selectNodeFilterInput = writable(false)
   export let filteredNodes = writable<NodeInfo[]>([])
@@ -19,7 +19,7 @@
 
 <script lang="ts">
   import Card from './lib/Card.svelte'
-  import { formatTemp, getCoordinates, getNodeName, getNodeNameById, hasAccess, displayFahrenheit, unixSecondsTimeAgo } from './lib/util'
+  import { formatTemp, getCoordinates, getNodeName, getNodeNameById, hasAccess, displayFahrenheit, unixSecondsTimeAgo, connectionStatusMessage } from './lib/util'
   import Microchip from './lib/icons/Microchip.svelte'
   import axios from 'axios'
   import Modal from './lib/Modal.svelte'
@@ -29,6 +29,10 @@
   import { getSvgUri, setPositionMode } from './Map.svelte'
   import ChannelUtilization from './lib/ChannelUtilization.svelte'
   import ObservedRF from './lib/ObservedRF.svelte'
+
+  /** Shown in the empty node list while the radio is being found or loaded */
+  $: spinning = !!connectionStatusMessage($connectionStatus, $address, $radioName, $configProgress)
+  $: busyMessage = connectionStatusMessage($connectionStatus, $address, $radioName, $configProgress) ?? ($connectionStatus == 'connected' ? 'Connected, waiting for nodes…' : undefined)
 
   export let includeMqtt = (localStorage.getItem('includeMqtt') ?? 'true') == 'true'
   let selectedNode: NodeInfo
@@ -285,6 +289,18 @@
     </div>
   {/if}
     <div class="p-1 text-sm grid gap-1 overflow-auto h-full content-start">
+      {#if $filteredNodes.length == 0}
+        <div class="flex flex-col items-center justify-center gap-3 py-10 text-white/70 text-sm">
+          {#if busyMessage}
+            {#if spinning}
+              <div class="animate-spin rounded-full h-10 w-10 border-4 border-white/20 border-t-yellow-300" role="status" aria-label="Loading"></div>
+            {/if}
+            <div>{busyMessage}</div>
+          {:else}
+            <div>Not connected. Enter the address and press Connect.</div>
+          {/if}
+        </div>
+      {/if}
       {#each $filteredNodes as node (node.num)}
         <div
           class:ring-1={node.hopsAway == 0}
@@ -367,6 +383,9 @@
               {/if}
               {#if node.isFavorite}
                 <div title="Favorite" class="cursor-help text-xs">⭐</div>
+              {/if}
+              {#if node.num == $myNodeNum && $connectionStatus == 'connected' && $bluetoothInfo?.targetRssi != undefined}
+                <div title="Bluetooth signal strength to this radio" class="cursor-help text-xs whitespace-nowrap">🔵 {$bluetoothInfo.targetRssi} dBm</div>
               {/if}
               {#if node.user?.isUnmessagable}
                 <div title="Unmessagable: this node does not monitor messages" class="bg-slate-500/50 text-slate-200 rounded px-1 cursor-help text-xs">UM</div>

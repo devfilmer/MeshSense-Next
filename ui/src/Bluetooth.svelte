@@ -6,7 +6,10 @@
   import axios from 'axios'
   import { hasAccess } from './lib/util'
 
-  let bluetoothDeviceList = new State<{ id: string; name: string }[]>('bluetoothDeviceList', [])
+  let bluetoothDeviceList = new State<{ id: string; name: string; rssi?: number }[]>('bluetoothDeviceList', [])
+
+  /** Strongest signal first, so the nearby radio is at the top */
+  $: devicesByStrength = $bluetoothDeviceList.slice().sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999))
 </script>
 
 {#if $connectionStatus == 'disconnected' && $hasAccess}
@@ -17,7 +20,7 @@
           No bluetooth {#if $smallMode}<br />{/if}devices detected
         </p>
       {/if}
-      {#each $bluetoothDeviceList as { id, name }}
+      {#each devicesByStrength as { id, name, rssi }}
         <button
           class="btn"
           class:hidden={name.startsWith('Unknown or Unsupported Device')}
@@ -26,7 +29,7 @@
             axios.post('/connect', { address: id })
           }}
         >
-          {name}
+          <span class="flex justify-between gap-2 w-full"><span>{name}</span><span class="text-white/60 text-xs">{rssi != undefined ? `${rssi} dBm` : ''}</span></span>
         </button>
       {/each}
     </div>

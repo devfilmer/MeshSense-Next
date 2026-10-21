@@ -22,6 +22,13 @@ export let messagePrefix = new State<string>('messagePrefix', undefined, { persi
 export let messageSuffix = new State<string>('messageSuffix', undefined, { persist: true })
 export let allowRemoteMessaging = new State<boolean>('allowRemoteMessaging', false, { persist: true })
 export let autoConnectOnStartup = new State<boolean>('autoConnectOnStartup', true, { persist: true })
+/** What the Bluetooth scanner has seen since startup. Not persisted. */
+/** Bluetooth name of the saved radio, remembered so it shows even when the radio is out of range */
+export let radioName = new State<string>('radioName', '', { persist: true })
+/** Progress of reading the radio after the link opens. Not persisted. */
+export let configProgress = new State<any>('configProgress', { stage: '', nodes: 0, channels: 0, configs: 0, modules: 0 }, { hideLog: true })
+export let bluetoothInfo = new State<any>('bluetoothInfo', { adapterAvailable: false, scanning: false, lastScanAt: 0, targetSeenAt: 0, devicesSeen: 0, lastError: '', targetRssi: undefined }, { hideLog: true })
+export let showNodeNameInAddress = new State<boolean>('showNodeNameInAddress', true, { persist: true })
 export let enableTLS = new State<boolean>('enableTLS', false, { persist: true })
 export let automaticTraceroutes = new State<boolean>('automaticTraceroutes', true, { persist: true })
 export let meshSenseNewsDate = new State<number>('meshSenseNewsDate', 0, { persist: true })
