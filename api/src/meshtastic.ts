@@ -32,6 +32,7 @@ import {
   version
 } from './vars'
 import { beginScanning, bluetoothDevices, stopScanning } from './lib/bluetooth'
+import { clearBluezLink } from './lib/bluez'
 import exitHook from 'exit-hook'
 import * as geolib from 'geolib'
 import axios from 'axios'
@@ -105,6 +106,9 @@ function sendToMeshMap(updates: Partial<NodeInfo & { name?: string }>, node?: No
         { source: myNodeNum.value, name: getMyNode()?.user?.shortName ?? '', updates, version: version.value ? version.value : process.env.VERSION },
         { timeout: 3000 }
       )
+      .then((response) => {
+        console.log(`[meshtastic] Uploaded node ${nodeNum ?? '?'} to the map (${response.status})`)
+      })
       .catch((e) => {
         console.log(`[meshtastic] Unable to send to ${meshMapForwardingURL}`, String(e), String(e.response?.data) ?? '')
       })
@@ -244,6 +248,12 @@ export async function disconnect(setIntent = true) {
     disableReconnect()
     connection.disconnect()
     clearTimeout(connection['timeout'])
+  }
+  // On a user disconnect, release the link at the BlueZ level too. The library's own disconnect can fail with
+  // "Peripheral not found", which leaves the radio connected, busy and no longer advertising.
+  const bluetoothAddress = String(address.value ?? '')
+  if (setIntent && process.platform == 'linux' && /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(bluetoothAddress)) {
+    clearBluezLink(bluetoothAddress).catch(() => {})
   }
   if (setIntent) reset()
 }
