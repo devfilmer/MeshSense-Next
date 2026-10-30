@@ -1,6 +1,6 @@
 import { Bluetooth } from '../../webbluetooth/dist'
 import { State } from './state'
-import { bluetoothInfo, connectionStatus, radioName } from '../vars'
+import { bluetoothInfo, connectionStatus, radioName, radioNameAddress } from '../vars'
 import { clearBluezLink, isBluezConnected, isBluezPaired } from './bluez'
 import { BluetoothDeviceImpl } from '../../webbluetooth/dist/device'
 import { createBluetooth } from 'node-ble'
@@ -11,7 +11,20 @@ let bluetoothDeviceList = new State('bluetoothDeviceList', [], { primaryKey: 'id
 let scanning = false
 let exitScanning = false
 let deviceTargetId = ''
-const bluetooth = new Bluetooth({ scanTime: 10 })
+/** Every device heard during the scan in progress, by id */
+let heardThisScan = new Map<string, BluetoothDeviceImpl>()
+/** Ends the scan in progress by selecting a device the library already reported */
+let endScan: (() => void) | undefined
+const bluetooth = new Bluetooth({
+  scanTime: 10,
+  // Keep listening through other devices' advertisements and end early only for the radio being looked for.
+  // Ending at the first device heard meant busy devices nearby won almost every scan and a radio was rarely found.
+  deviceFound(device, select) {
+    heardThisScan.set(device.id, device)
+    endScan = select
+    return device.id == deviceTargetId
+  }
+})
 
 /** Signal strength from the last advertisement. The library keeps it in its advertisement data, not on `rssi`. */
 function deviceRssi(device: BluetoothDeviceImpl): number | undefined {
@@ -22,54 +35,105 @@ function updateBluetoothInfo(update: object) {
   bluetoothInfo.set({ ...bluetoothInfo.value, ...update })
 }
 
+/** Bumped whenever the scan loop is stopped or restarted, so a late-finishing old loop never schedules itself again */
+let scanGeneration = 0
+/** When the scan loop last started a scan; the watchdog restarts the loop when this gets old */
+let lastScanCycleAt = 0
+/** Settles when the scan in progress ends */
+let scanCycle: Promise<void> = Promise.resolve()
+
 /** Loop to show devices consistently */
-export async function scanForDevice() {
-  if (exitScanning) return
+export async function scanForDevice(expectedGeneration?: number) {
+  // A tick scheduled by a loop that has since been stopped or replaced must not start a second loop
+  if (exitScanning || (expectedGeneration !== undefined && expectedGeneration != scanGeneration)) return
+  const generation = scanGeneration
+  lastScanCycleAt = Date.now()
+  let endCycle: () => void
+  scanCycle = new Promise((resolve) => (endCycle = resolve))
 
   console.log('[bluetooth] scanning...')
 
+  let scanError = ''
+  heardThisScan = new Map()
+  endScan = undefined
+  // When no device is selected the library never settles its request, so end the scan just before its own timeout
+  const scanTimer = setTimeout(() => endScan?.(), 9000)
   try {
-    let scanError = ''
-    let device: BluetoothDeviceImpl = await bluetooth.requestDevice({ acceptAllDevices: true }).catch((e) => {
-      scanError = String(e?.message ?? e)
-      console.warn(e)
-    })
-    // let device = await bluetooth.requestDevice({ filters: [{ services: [Constants.ServiceUuid] }] }).catch((e) => console.error(e))
-    // let device = await bluetooth.requestDevice({ filters: [{ serviceData: [] }] }).catch((e) => console.error(e))
-    // let device = await bluetooth
-    //   .requestDevice({
-    //     filters: [{ services: ['00001801-0000-1000-8000-00805f9b34fb'] }, { services: ['6ba1b218-15a8-461f-9fa8-5dcae273eafd'] }, { services: ['0000180f-0000-1000-8000-00805f9b34fb'] }]
-    //   })
-    //   .catch((e) => console.error(e))
+    // The library throws "request in progress" synchronously instead of rejecting; turn that into a rejection
+    // so it is handled like any other failed scan and the loop keeps going
+    await Promise.resolve()
+      .then(() => bluetooth.requestDevice({ acceptAllDevices: true }))
+      .catch((e) => {
+        // A scan that heard nothing at all is not an error
+        if (String(e).includes('no devices found')) return
+        scanError = String(e?.message ?? e)
+        console.warn(e)
+      })
+    clearTimeout(scanTimer)
 
-    // device.gatt.disconnect()
-
-    if (device) {
+    for (const device of heardThisScan.values()) {
       console.log('[bluetooth] Device Detected |', device.id, device.name)
       bluetoothDevices[device.id] = device
       let { id, name } = device
       bluetoothDeviceList.upsert({ id, name, rssi: deviceRssi(device) })
-      if (id == deviceTargetId) {
-        updateBluetoothInfo({ targetSeenAt: Date.now(), targetRssi: deviceRssi(device) })
-        // Without pairing the link opens and then fails, so tell the user instead of retrying silently
-        isBluezPaired(id).then((paired) => {
-          if (paired !== undefined) updateBluetoothInfo({ targetPaired: paired })
-        })
-        if (device.name && device.name != radioName.value) radioName.set(device.name)
-        stopScanning()
-      }
+    }
+
+    const target = deviceTargetId ? heardThisScan.get(deviceTargetId) : undefined
+    if (target) {
+      updateBluetoothInfo({ targetSeenAt: Date.now(), targetRssi: deviceRssi(target) })
+      // Without pairing the link opens and then fails, so tell the user instead of retrying silently
+      isBluezPaired(target.id).then((paired) => {
+        if (paired !== undefined) updateBluetoothInfo({ targetPaired: paired })
+      })
+      if (target.name && target.name != radioName.value) radioName.set(target.name)
+      if (radioNameAddress.value != target.id) radioNameAddress.set(target.id)
+      stopScanning()
     }
 
     updateBluetoothInfo({ scanning: !exitScanning, lastScanAt: Date.now(), devicesSeen: bluetoothDeviceList.value.length, lastError: scanError })
-    if (!exitScanning) setTimeout(scanForDevice, 500)
   } catch (e) {
     console.error('[bluetooth], Error encountered during scan', e)
+  } finally {
+    endCycle()
+    // Always continue the loop, waiting longer after an error so a busy adapter is not hammered
+    if (!exitScanning && generation == scanGeneration) setTimeout(() => scanForDevice(generation), scanError ? 2000 : 500)
   }
 }
 
+/** A scan takes at most about 10 s. If none has started for much longer, the loop has died; restart it. */
+setInterval(() => {
+  if (scanning && !exitScanning && Date.now() - lastScanCycleAt > 30000) {
+    console.warn('[bluetooth] Scanning stalled; restarting it')
+    scanning = false
+    try {
+      bluetooth.cancelRequest()
+    } catch {}
+    beginScanning(deviceTargetId)
+  }
+}, 10000)
+
+/** Stops scanning and waits for the scan in progress to end, so the adapter is free (for example to pair) */
+export async function pauseScanning() {
+  stopScanning()
+  try {
+    bluetooth.cancelRequest()
+  } catch {}
+  await Promise.race([scanCycle, new Promise((resolve) => setTimeout(resolve, 12000))])
+}
+
 export async function beginScanning(targetId?: string) {
+  // A different radio: forget what was learned about the previous one so its state is never shown for this one
+  if (targetId && targetId != bluetoothInfo.value?.targetAddress) {
+    updateBluetoothInfo({ targetAddress: targetId, targetPaired: undefined, targetSeenAt: 0, targetRssi: undefined, staleLinkCleared: false })
+  }
   deviceTargetId = targetId
   delete bluetoothDevices[targetId]
+  // Check pairing even if a scan is already running, so the status is right for this radio
+  if (targetId) {
+    isBluezPaired(targetId).then((paired) => {
+      if (paired !== undefined && targetId == bluetoothInfo.value?.targetAddress) updateBluetoothInfo({ targetPaired: paired })
+    })
+  }
   if (scanning) {
     console.warn('Already Scanning')
     return
@@ -81,8 +145,6 @@ export async function beginScanning(targetId?: string) {
   /** A radio still connected at the BlueZ level stops advertising, so the scan would never find it. Clear that link first. */
   if (targetId) {
     try {
-      const paired = await isBluezPaired(targetId)
-      if (paired !== undefined) updateBluetoothInfo({ targetPaired: paired })
       // Only a link nobody in this process owns is stale. Once the app is connecting or connected, the link is ours.
       const appOwnsLink = () => ['connecting', 'configuring', 'connected'].includes(connectionStatus.value as string)
       if (!appOwnsLink() && (await isBluezConnected(targetId)) && !appOwnsLink()) {
@@ -116,6 +178,7 @@ export async function beginScanning(targetId?: string) {
   updateBluetoothInfo({ adapterAvailable })
   if (adapterAvailable) {
     scanning = true
+    scanGeneration++
     exitScanning = false
     scanForDevice()
   }
@@ -124,6 +187,7 @@ export async function beginScanning(targetId?: string) {
 export function stopScanning() {
   if (scanning) console.log('[bluetooth] Stop Scanning')
   exitScanning = true
+  scanGeneration++
   scanning = false
   updateBluetoothInfo({ scanning: false })
 }

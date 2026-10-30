@@ -11,6 +11,7 @@ import {
   Position,
   address,
   automaticTraceroutes,
+  bluetoothInfo,
   broadcastId,
   channels,
   connectionStatus,
@@ -27,12 +28,15 @@ import {
   packetLimit,
   configProgress,
   packets,
+  pairingStatus,
   pendingTraceroutes,
+  radioName,
+  radioNameAddress,
   tracerouteRateLimit,
   version
 } from './vars'
 import { beginScanning, bluetoothDevices, stopScanning } from './lib/bluetooth'
-import { clearBluezLink } from './lib/bluez'
+import { clearBluezLink, isBluezPaired } from './lib/bluez'
 import exitHook from 'exit-hook'
 import * as geolib from 'geolib'
 import axios from 'axios'
@@ -283,6 +287,15 @@ export async function connect(address?: string) {
   connectionIntended = true
   if (!address || address == '') return
 
+  // A different radio: drop the previous radio's name and pairing request. For the same radio, keep the
+  // pairing request showing; trying again cannot succeed until it is paired.
+  if (radioNameAddress.value != address) {
+    radioName.set('')
+    radioNameAddress.set(address)
+    pairingStatus.set({ state: 'idle', message: '' })
+  }
+  if (bluetoothInfo.value?.needsPairing && bluetoothInfo.value.needsPairing != address) bluetoothInfo.set({ ...bluetoothInfo.value, needsPairing: '' })
+
   if (validateMACAddress(address)) {
     /** Bluetooth Device */
     connection = new BleConnection()
@@ -305,6 +318,8 @@ export async function connect(address?: string) {
   connectionStatus.set('connecting')
   channels.set([])
   updateTimeout()
+  /** Set once the radio has finished sending its configuration, to tell a failed first attempt from a later drop */
+  let reachedConfigured = false
 
   //   DeviceRestarting = 1,
   //   DeviceDisconnected = 2,
@@ -322,13 +337,24 @@ export async function connect(address?: string) {
     } else if (e == 3) {
       connectionStatus.set('connecting')
     } else if (e == 7) {
+      reachedConfigured = true
+      if (bluetoothInfo.value?.needsPairing) bluetoothInfo.set({ ...bluetoothInfo.value, needsPairing: '' })
       connectionStatus.set('connected')
       // setTime()
       // } else if (e == 4) {
       // await disconnect()
     } else if (e == 2) {
       console.log('Connection Intended', connectionIntended)
-      if (connectionIntended) {
+      // The background pairing check may not have answered yet on a fast first attempt; then ask Bluetooth directly
+      let paired = bluetoothInfo.value?.targetPaired
+      if (paired === undefined && connection instanceof BleConnection && process.platform == 'linux') paired = await isBluezPaired(address)
+      if (connectionIntended && !reachedConfigured && connection instanceof BleConnection && paired === false) {
+        // A radio that requires pairing drops the link of an unpaired client, and retrying cannot change that.
+        // Stop, ask for the PIN, and release the link so the radio is free for other devices.
+        console.log('[meshtastic] The radio requires pairing; not retrying')
+        bluetoothInfo.set({ ...bluetoothInfo.value, needsPairing: address })
+        disconnect()
+      } else if (connectionIntended) {
         connectionStatus.set('reconnecting')
         connect(address)
       } else {

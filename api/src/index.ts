@@ -4,7 +4,9 @@ import './lib/persistence'
 import { app, createRoutes, finalize, server } from './lib/server'
 import './meshtastic'
 import { connect, disconnect, deleteNodes, requestPosition, send, traceRoute, setPosition, deviceConfig } from './meshtastic'
-import { address, apiPort, currentTime, apiHostname, accessKey, autoConnectOnStartup, meshSenseNewsDate, allowRemoteMessaging } from './vars'
+import { address, apiPort, bluetoothInfo, currentTime, apiHostname, accessKey, autoConnectOnStartup, meshSenseNewsDate, allowRemoteMessaging, pairingStatus } from './vars'
+import { pairBluezDevice } from './lib/bluez'
+import { beginScanning, pauseScanning } from './lib/bluetooth'
 import { hostname } from 'os'
 import intercept from 'intercept-stdout'
 import { createWriteStream } from 'fs'
@@ -70,6 +72,28 @@ createRoutes((app) => {
     console.log('[express]', '/connect')
     connect(req.body.address || address.value)
     return res.sendStatus(200)
+  })
+
+  app.post('/pair', async (req, res) => {
+    if (!isAuthorized(req)) return res.sendStatus(403)
+    const pairAddress = String(req.body.address ?? '')
+    const pin = String(req.body.pin ?? '')
+    if (process.platform != 'linux') return res.status(400).json({ ok: false, message: 'Pairing from MeshSense is only available on Linux. Pair the radio in your system Bluetooth settings.' })
+    if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(pairAddress)) return res.status(400).json({ ok: false, message: 'That is not a Bluetooth address.' })
+    if (!/^\d{1,6}$/.test(pin)) return res.status(400).json({ ok: false, message: 'Enter the PIN as digits only (up to 6).' })
+    if (pairingStatus.value.state == 'pairing') return res.status(409).json({ ok: false, message: 'Pairing is already in progress.' })
+    // The PIN is never logged or stored
+    console.log('[express]', '/pair', pairAddress)
+    pairingStatus.set({ state: 'pairing', message: 'Pairing with the radio. This can take up to 30 seconds…', address: pairAddress, at: Date.now() })
+    // Scanning and pairing share the adapter; a scan running during pairing fails and used to stop the scanner
+    await pauseScanning()
+    const result = await pairBluezDevice(pairAddress, pin)
+    pairingStatus.set({ state: result.ok ? 'paired' : 'failed', message: result.message, address: pairAddress, at: Date.now() })
+    if (result.ok) {
+      bluetoothInfo.set({ ...bluetoothInfo.value, needsPairing: '', targetPaired: true })
+      connect(pairAddress)
+    } else beginScanning(pairAddress)
+    return res.json(result)
   })
 
   app.post('/disconnect', async (req, res) => {

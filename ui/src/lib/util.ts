@@ -334,11 +334,17 @@ export function connectionStatusMessage(status: string, address: string, name?: 
 export function bluetoothDetails(info: any, address: string, now: number): string[] {
   if (!info) return []
   let lines: string[] = [info.adapterAvailable ? 'Bluetooth adapter ready' : 'No Bluetooth adapter found']
-  if (info.targetPaired === false) lines.push('Not paired with this device. Pair the radio in the Pi Bluetooth settings first (Meshtastic default PIN is 123456).')
-  if (info.lastScanAt) lines.push(`Last scan ${Math.max(0, Math.round((now - info.lastScanAt) / 1000))} s ago, ${info.devicesSeen} devices seen since start`)
-  lines.push(info.targetSeenAt ? `${address} seen ${Math.max(0, Math.round((now - info.targetSeenAt) / 1000))} s ago` : `${address} not seen since start`)
-  if (info.targetRssi != undefined) lines.push(`Bluetooth signal ${info.targetRssi} dBm`)
-  if (info.staleLinkCleared) lines.push('Cleared an old Bluetooth link to the radio')
+  // What is known about the radio only applies when it is the radio in the address box
+  const forThisRadio = !info.targetAddress || info.targetAddress == address
+  if (forThisRadio && info.targetPaired === false) lines.push('Not paired with this radio yet. It must be paired before it can connect.')
+  const scanAge = info.lastScanAt ? Math.max(0, Math.round((now - info.lastScanAt) / 1000)) : undefined
+  if (info.scanning && scanAge > 30) lines.push(`Bluetooth scanning has not run for ${scanAge} s. It restarts automatically; if this stays, restart MeshSense.`)
+  else if (scanAge != undefined) lines.push(`Last scan ${scanAge} s ago, ${info.devicesSeen} devices seen since start`)
+  if (forThisRadio) {
+    lines.push(info.targetSeenAt ? `${address} seen ${Math.max(0, Math.round((now - info.targetSeenAt) / 1000))} s ago` : `${address} not seen since start`)
+    if (info.targetRssi != undefined) lines.push(`Bluetooth signal ${info.targetRssi} dBm`)
+    if (info.staleLinkCleared) lines.push('Cleared an old Bluetooth link to the radio')
+  }
   if (info.lastError) lines.push(`Last error: ${info.lastError}`)
   return lines
 }

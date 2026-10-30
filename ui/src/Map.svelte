@@ -30,7 +30,7 @@
 </script>
 
 <script lang="ts">
-  import { address, bluetoothInfo, radioName, configProgress, connectionStatus, currentTime, myNodeNum, version, type NodeInfo } from 'api/src/vars'
+  import { address, bluetoothInfo, radioName, radioNameAddress, configProgress, connectionStatus, currentTime, myNodeNum, version, type NodeInfo } from 'api/src/vars'
   import { filteredNodes, isInactive, nodeVisibilityMode } from './Nodes.svelte'
   import Card from './lib/Card.svelte'
   import OpenLayersMap from './lib/OpenLayersMap.svelte'
@@ -131,11 +131,11 @@
     }}
     onDarkModeToggle={plotData}
   ></OpenLayersMap>
-  {#if connectionStatusMessage($connectionStatus, $address, $radioName, $configProgress)}
+  {#if connectionStatusMessage($connectionStatus, $address, $radioNameAddress == $address ? $radioName : '', $configProgress)}
     <div class="absolute inset-0 grid place-content-center pointer-events-none">
       <div class="bg-black/70 text-white rounded-lg px-4 py-3 text-sm flex items-center gap-3 max-w-md">
         <div class="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-yellow-300 shrink-0" role="status" aria-label="Working"></div>
-        <div>{connectionStatusMessage($connectionStatus, $address, $radioName, $configProgress)}</div>
+        <div>{connectionStatusMessage($connectionStatus, $address, $radioNameAddress == $address ? $radioName : '', $configProgress)}</div>
         {#each [...bluetoothDetails($bluetoothInfo, $address, $currentTime), ...configProgressLines($configProgress)] as line}
           <div class="text-xs text-white/60">{line}</div>
         {/each}

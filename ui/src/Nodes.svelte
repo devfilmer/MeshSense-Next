@@ -1,5 +1,5 @@
 <script context="module" lang="ts">
-  import { address, bluetoothInfo, radioName, configProgress, connectionStatus, currentTime, myNodeInfo, myNodeMetadata, myNodeNum, nodeInactiveTimer, nodes, pendingTraceroutes, type NodeInfo } from 'api/src/vars'
+  import { address, bluetoothInfo, radioName, radioNameAddress, configProgress, connectionStatus, currentTime, myNodeInfo, myNodeMetadata, myNodeNum, nodeInactiveTimer, nodes, pendingTraceroutes, type NodeInfo } from 'api/src/vars'
   export let smallMode = writable(false)
   export let selectNodeFilterInput = writable(false)
   export let filteredNodes = writable<NodeInfo[]>([])
@@ -31,8 +31,8 @@
   import ObservedRF from './lib/ObservedRF.svelte'
 
   /** Shown in the empty node list while the radio is being found or loaded */
-  $: spinning = !!connectionStatusMessage($connectionStatus, $address, $radioName, $configProgress)
-  $: busyMessage = connectionStatusMessage($connectionStatus, $address, $radioName, $configProgress) ?? ($connectionStatus == 'connected' ? 'Connected, waiting for nodes…' : undefined)
+  $: spinning = !!connectionStatusMessage($connectionStatus, $address, $radioNameAddress == $address ? $radioName : '', $configProgress)
+  $: busyMessage = connectionStatusMessage($connectionStatus, $address, $radioNameAddress == $address ? $radioName : '', $configProgress) ?? ($connectionStatus == 'connected' ? 'Connected, waiting for nodes…' : undefined)
 
   export let includeMqtt = (localStorage.getItem('includeMqtt') ?? 'true') == 'true'
   let selectedNode: NodeInfo
@@ -296,6 +296,8 @@
               <div class="animate-spin rounded-full h-10 w-10 border-4 border-white/20 border-t-yellow-300" role="status" aria-label="Loading"></div>
             {/if}
             <div>{busyMessage}</div>
+          {:else if $bluetoothInfo?.needsPairing && $bluetoothInfo.needsPairing == $address}
+            <div>This radio must be paired before it can connect. Enter its PIN in the Address card.</div>
           {:else}
             <div>Not connected. Enter the address and press Connect.</div>
           {/if}

@@ -25,10 +25,14 @@ export let autoConnectOnStartup = new State<boolean>('autoConnectOnStartup', tru
 /** What the Bluetooth scanner has seen since startup. Not persisted. */
 /** Bluetooth name of the saved radio, remembered so it shows even when the radio is out of range */
 export let radioName = new State<string>('radioName', '', { persist: true })
+/** Address that `radioName` belongs to, so another radio's name is never shown for this one */
+export let radioNameAddress = new State<string>('radioNameAddress', '', { persist: true })
 /** Progress of reading the radio after the link opens. Not persisted. */
 export let configProgress = new State<any>('configProgress', { stage: '', nodes: 0, channels: 0, configs: 0, modules: 0 }, { hideLog: true })
 export let bluetoothInfo = new State<any>('bluetoothInfo', { adapterAvailable: false, scanning: false, lastScanAt: 0, targetSeenAt: 0, devicesSeen: 0, lastError: '', targetRssi: undefined }, { hideLog: true })
-export let showNodeNameInAddress = new State<boolean>('showNodeNameInAddress', true, { persist: true })
+/** Progress of pairing the radio with a PIN: `idle`, `pairing`, `paired` or `failed`. Never holds the PIN. Not persisted. */
+export let pairingStatus = new State<any>('pairingStatus', { state: 'idle', message: '' }, { hideLog: true })
+export let showNodeNameInAddress =new State<boolean>('showNodeNameInAddress', true, { persist: true })
 export let enableTLS = new State<boolean>('enableTLS', false, { persist: true })
 export let automaticTraceroutes = new State<boolean>('automaticTraceroutes', true, { persist: true })
 export let meshSenseNewsDate = new State<number>('meshSenseNewsDate', 0, { persist: true })
