@@ -75,7 +75,7 @@ export async function scanForDevice(expectedGeneration?: number) {
       console.log('[bluetooth] Device Detected |', device.id, device.name)
       bluetoothDevices[device.id] = device
       let { id, name } = device
-      bluetoothDeviceList.upsert({ id, name, rssi: deviceRssi(device) })
+      bluetoothDeviceList.upsert({ id, name, rssi: deviceRssi(device), seenAt: Date.now() })
     }
 
     const target = deviceTargetId ? heardThisScan.get(deviceTargetId) : undefined
@@ -134,10 +134,23 @@ export async function beginScanning(targetId?: string) {
       if (paired !== undefined && targetId == bluetoothInfo.value?.targetAddress) updateBluetoothInfo({ targetPaired: paired })
     })
   }
-  if (scanning) {
+  // A second call while the first is still checking the adapter would start a second scan loop
+  if (scanning || startingScan) {
     console.warn('Already Scanning')
     return
   }
+  startingScan = true
+  try {
+    await startScanLoop(targetId)
+  } finally {
+    startingScan = false
+  }
+}
+
+/** True while beginScanning checks the link and adapter, before the loop has started */
+let startingScan = false
+
+async function startScanLoop(targetId?: string) {
   console.log('[bluetooth] Begin Scanning')
 
   let adapterAvailable = false

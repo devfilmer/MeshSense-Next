@@ -6,10 +6,29 @@
   import axios from 'axios'
   import { hasAccess } from './lib/util'
 
-  let bluetoothDeviceList = new State<{ id: string; name: string; rssi?: number }[]>('bluetoothDeviceList', [])
+  import { onMount } from 'svelte'
 
-  /** Strongest signal first, so the nearby radio is at the top */
-  $: devicesByStrength = $bluetoothDeviceList.slice().sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999))
+  let bluetoothDeviceList = new State<{ id: string; name: string; rssi?: number; seenAt?: number }[]>('bluetoothDeviceList', [])
+
+  let now = Date.now()
+  onMount(() => {
+    const timer = setInterval(() => (now = Date.now()), 5000)
+    return () => clearInterval(timer)
+  })
+
+  /** A device not heard for this long is shown as last seen, not as present */
+  const staleAfterMs = 60000
+  const isStale = (seenAt: number | undefined) => !seenAt || now - seenAt > staleAfterMs
+
+  /** Devices heard recently first, strongest signal first, so the nearby radio is at the top */
+  $: devicesByStrength = $bluetoothDeviceList
+    .slice()
+    .sort((a, b) => Number(isStale(a.seenAt)) - Number(isStale(b.seenAt)) || (b.rssi ?? -999) - (a.rssi ?? -999))
+
+  function seenText(rssi: number | undefined, seenAt: number | undefined) {
+    if (isStale(seenAt)) return seenAt ? `seen ${Math.round((now - seenAt) / 60000) || 1} min ago` : 'not seen recently'
+    return rssi != undefined ? `${rssi} dBm` : ''
+  }
 </script>
 
 {#if $connectionStatus == 'disconnected' && $hasAccess}
@@ -20,16 +39,18 @@
           No bluetooth {#if $smallMode}<br />{/if}devices detected
         </p>
       {/if}
-      {#each devicesByStrength as { id, name, rssi }}
+      {#each devicesByStrength as { id, name, rssi, seenAt } (id)}
         <button
           class="btn"
+          class:opacity-50={isStale(seenAt)}
+          title="Connect to {name} ({id})"
           class:hidden={name.startsWith('Unknown or Unsupported Device')}
           on:click={() => {
             $address = id
             axios.post('/connect', { address: id })
           }}
         >
-          <span class="flex justify-between gap-2 w-full"><span>{name}</span><span class="text-white/60 text-xs">{rssi != undefined ? `${rssi} dBm` : ''}</span></span>
+          <span class="flex justify-between gap-2 w-full"><span>{name}</span><span class="text-white/60 text-xs">{seenText(rssi, seenAt)}</span></span>
         </button>
       {/each}
     </div>

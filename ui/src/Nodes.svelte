@@ -299,7 +299,7 @@
           {:else if $bluetoothInfo?.needsPairing && $bluetoothInfo.needsPairing == $address}
             <div>This radio must be paired before it can connect. Enter its PIN in the Address card.</div>
           {:else}
-            <div>Not connected. Enter the address and press Connect.</div>
+            <div>Not connected. {$address ? 'Press Connect in the Address card' : 'Enter an address or pick a Bluetooth device, then press Connect'} to see the mesh.</div>
           {/if}
         </div>
       {/if}

@@ -36,6 +36,8 @@ export class BleConnection extends MeshDevice {
 
   private timerUpdateFromRadio: NodeJS.Timeout | null = null;
   private readingFromRadio = false;
+  /** Reads that failed in a row while the link still looked connected */
+  private readFailures = 0;
 
   constructor(configId?: number) {
     super(configId);
@@ -239,6 +241,7 @@ export class BleConnection extends MeshDevice {
       let hasMoreData = true;
       while (hasMoreData && this.fromRadioCharacteristic) {
         const value = await this.fromRadioCharacteristic.readValue();
+        this.readFailures = 0;
 
         if (value.byteLength === 0) {
           hasMoreData = false;
@@ -256,6 +259,17 @@ export class BleConnection extends MeshDevice {
         `❌ ${error instanceof Error ? error.message : "Unknown error"}`,
       );
       if (!this.device?.gatt?.connected) return; // link is gone; the disconnect handler reports it
+      // A radio that went away without a disconnect event (unpaired, powered off, out of range) leaves the
+      // link looking connected while every read fails. Treat several failures in a row as a lost link.
+      if (++this.readFailures >= 5) {
+        this.log.error(
+          Types.Emitter[Types.Emitter.ReadFromRadio],
+          "❌ The radio stopped responding; treating the link as lost",
+        );
+        this.readFailures = 0;
+        this.disconnect();
+        return;
+      }
       throw error; // Re-throw to let caller handle
     } finally {
       this.readingFromRadio = false;

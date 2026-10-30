@@ -430,8 +430,10 @@ export async function connect(address?: string) {
       // hop-change comparison never differs and traceroutes are only sent when a route is missing. Likewise
       // `updates.trace` is assigned after the upsert and only reaches nodes seen for the first time.
       // Left as is: correcting either would send noticeably more traceroutes over the mesh.
+      // Packets the radio replays from history right after connecting are not new activity; tracing routes for
+      // them sent a burst of traceroutes over the mesh on every connect that the user never asked for.
       if (updates.hopsAway == 0) updates.trace = null
-      else if (automaticTraceroutes.value && updatedNode?.position?.latitudeI && updates.hopsAway && (!updatedNode.trace || originalNodeRecord?.hopsAway != updates.hopsAway)) {
+      else if (!isReplayedPacket(e.rxTime) && automaticTraceroutes.value &&updatedNode?.position?.latitudeI && updates.hopsAway && (!updatedNode.trace || originalNodeRecord?.hopsAway != updates.hopsAway)) {
         if (isTracerouteAvailable(updates.num)) traceRoute(updates.num)
       }
     }

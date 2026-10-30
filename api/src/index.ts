@@ -5,7 +5,7 @@ import { app, createRoutes, finalize, server } from './lib/server'
 import './meshtastic'
 import { connect, disconnect, deleteNodes, requestPosition, send, traceRoute, setPosition, deviceConfig } from './meshtastic'
 import { address, apiPort, bluetoothInfo, currentTime, apiHostname, accessKey, autoConnectOnStartup, meshSenseNewsDate, allowRemoteMessaging, pairingStatus } from './vars'
-import { pairBluezDevice } from './lib/bluez'
+import { cancelBluezPairing, pairBluezDevice } from './lib/bluez'
 import { beginScanning, pauseScanning } from './lib/bluetooth'
 import { hostname } from 'os'
 import intercept from 'intercept-stdout'
@@ -22,6 +22,8 @@ process.on('uncaughtException', (err, origin) => {
 
 let consoleLog = []
 let logSize = 1000
+/** Set when the user cancels a pairing before the PIN has been sent */
+let pairCancelRequested = false
 
 let lastLogStream = createWriteStream(join(dataDirectory, 'lastLog.txt'))
 intercept(
@@ -84,16 +86,32 @@ createRoutes((app) => {
     if (pairingStatus.value.state == 'pairing') return res.status(409).json({ ok: false, message: 'Pairing is already in progress.' })
     // The PIN is never logged or stored
     console.log('[express]', '/pair', pairAddress)
-    pairingStatus.set({ state: 'pairing', message: 'Pairing with the radio. This can take up to 30 seconds…', address: pairAddress, at: Date.now() })
+    const startedAt = Date.now()
+    pairCancelRequested = false
+    pairingStatus.set({ state: 'pairing', message: 'Stopping the Bluetooth scan so the adapter is free…', address: pairAddress, at: startedAt })
     // Scanning and pairing share the adapter; a scan running during pairing fails and used to stop the scanner
     await pauseScanning()
-    const result = await pairBluezDevice(pairAddress, pin)
+    let result = { ok: false, message: 'Pairing cancelled.' }
+    if (!pairCancelRequested) {
+      pairingStatus.set({ state: 'pairing', message: 'Sending the PIN and waiting for the radio to accept it. This can take up to 30 seconds…', address: pairAddress, at: startedAt })
+      result = await pairBluezDevice(pairAddress, pin)
+    }
     pairingStatus.set({ state: result.ok ? 'paired' : 'failed', message: result.message, address: pairAddress, at: Date.now() })
     if (result.ok) {
       bluetoothInfo.set({ ...bluetoothInfo.value, needsPairing: '', targetPaired: true })
       connect(pairAddress)
     } else beginScanning(pairAddress)
     return res.json(result)
+  })
+
+  app.post('/pair/cancel', async (req, res) => {
+    if (!isAuthorized(req)) return res.sendStatus(403)
+    console.log('[express]', '/pair/cancel')
+    if (pairingStatus.value.state != 'pairing') return res.sendStatus(200)
+    pairCancelRequested = true
+    pairingStatus.set({ ...pairingStatus.value, message: 'Cancelling…' })
+    await cancelBluezPairing()
+    return res.sendStatus(200)
   })
 
   app.post('/disconnect', async (req, res) => {

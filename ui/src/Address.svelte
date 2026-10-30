@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { connectionStatus, address, enableTLS, lastFromRadio, lockdownStatus, nodes, myNodeNum, showNodeNameInAddress, bluetoothInfo, currentTime, radioName, radioNameAddress, configProgress, pairingStatus } from 'api/src/vars'
+  import { connectionStatus, address, enableTLS, lastFromRadio, lockdownStatus, nodes, myNodeNum, showNodeNameInAddress, bluetoothInfo, myNodeInfo, radioName, radioNameAddress, configProgress, pairingStatus } from 'api/src/vars'
   import Card from './lib/Card.svelte'
   import { smallMode } from './Nodes.svelte'
   import { hasAccess, connectionStatusMessage, bluetoothDetails, configProgressLines } from './lib/util'
@@ -22,13 +22,26 @@
     disconnected: '🔴'
   }
 
+  /** The button just pressed, shown until the server reports the new state, so a click never looks ignored */
+  let pending: { label: string; from: string; at: number } | undefined
+  /** What the last button press did, kept while disconnected so the user knows why it stopped */
+  let lastOutcome = ''
+
   function connect() {
+    pending = { label: 'Starting…', from: $connectionStatus, at: Date.now() }
+    lastOutcome = ''
     axios.post('/connect', { address: $address })
   }
 
   function disconnect() {
+    const wasConnected = $connectionStatus == 'connected'
+    pending = { label: wasConnected ? 'Disconnecting…' : 'Stopping…', from: $connectionStatus, at: Date.now() }
+    lastOutcome = wasConnected ? `Disconnected at ${new Date().toLocaleTimeString()}.` : `Stopped at ${new Date().toLocaleTimeString()}. Press Connect to try again.`
     axios.post('/disconnect')
   }
+
+  $: if (pending && ($connectionStatus != pending.from || now - pending.at > 15000)) pending = undefined
+  $: if ($connectionStatus != 'disconnected' && !pending) lastOutcome = ''
 
   let pin = ''
   /** When the PIN was last edited; a pairing result older than that is hidden so it is not mistaken for the new attempt */
@@ -48,6 +61,10 @@
     pin = ''
   }
 
+  function cancelPairing() {
+    axios.post('/pair/cancel').catch(() => {})
+  }
+
   let spinnerAngle = 0
 
   $: if ($lastFromRadio && $connectionStatus == 'configuring') spinnerAngle = (spinnerAngle + 8) % 360
@@ -57,7 +74,18 @@
   $: deviceName = $nodes.find((n) => n.num == $myNodeNum)?.user?.shortName || ''
   $: addressLabel = $showNodeNameInAddress && deviceName && $connectionStatus != 'disconnected' ? `${deviceName} (${$address})` : $address
 
-  $: busyMessage = connectionStatusMessage($connectionStatus, $address, $radioNameAddress == $address ? $radioName : '', $configProgress)
+  /** When the connection status last changed, for the elapsed time beside it */
+  let statusSince = Date.now()
+  $: $connectionStatus, (statusSince = Date.now())
+  $: statusSeconds = Math.max(0, Math.round((now - statusSince) / 1000))
+
+  $: statusMessage = connectionStatusMessage($connectionStatus, $address, $radioNameAddress == $address ? $radioName : '', $configProgress)
+  $: busyMessage = statusMessage && `${statusMessage} (${statusSeconds} s)`
+  /** A search that goes on this long is not just slow; say what usually causes it */
+  $: searchAdvice =
+    $connectionStatus == 'searching' && statusSeconds >= 45
+      ? 'Not found yet. Check that the radio is on and nearby, and that no phone or other app is connected to it: a connected radio stops advertising. Press Cancel to stop looking.'
+      : ''
 
   $: lockdownNotice = ['NEEDS_PROVISION', 'LOCKED', 'UNLOCK_FAILED'].includes($lockdownStatus?.stateName) ? $lockdownStatus : undefined
 </script>
@@ -81,9 +109,9 @@
         {connectionIcons[$connectionStatus]}
       {/if}
       {#if $connectionStatus == 'disconnected'}
-        <input size="3" class="input w-full" type="text" bind:value={$address} placeholder="Device IP" />
+        <input size="3" class="input w-full" type="text" bind:value={$address} placeholder="IP or Bluetooth address" />
       {:else}
-        <div class="input w-full truncate" title={addressLabel}>{addressLabel}</div>
+        <div class="input w-full truncate" title="{addressLabel}. To change the address, press {$connectionStatus == 'connected' ? 'Disconnect' : 'Cancel'} first.">{addressLabel}</div>
       {/if}
     </div>
     <!-- Cancel Button -->
@@ -101,15 +129,31 @@
       {/if}
     {/if}
   </form>
-  {#if busyMessage}
+  {#if pending}
+    <div class="flex items-center gap-2 text-xs text-yellow-200 px-2 pb-2">
+      <div class="animate-spin rounded-full h-3 w-3 border-2 border-yellow-200 border-t-transparent" role="status" aria-label="Working"></div>
+      {pending.label}
+    </div>
+  {:else if lastOutcome && $connectionStatus == 'disconnected'}
+    <div class="text-xs text-white/60 px-2 pb-2">{lastOutcome}</div>
+  {/if}
+  {#if busyMessage && !pending}
+    <!-- Zero width plus full minimum width: long status text wraps instead of widening the column -->
+    <div class="w-0 min-w-full break-words">
     <div class="flex items-center gap-2 text-xs text-yellow-200 px-2 pb-2">
       <div class="animate-spin rounded-full h-3 w-3 border-2 border-yellow-200 border-t-transparent" role="status" aria-label="Working"></div>
       {busyMessage}
     </div>
     <div class="text-xs text-white/60 px-2 pb-2 grid gap-0.5">
-      {#each [...bluetoothDetails($bluetoothInfo, $address, $currentTime), ...configProgressLines($configProgress)] as line}
+      {#each [...bluetoothDetails($bluetoothInfo, $address, now), ...configProgressLines($configProgress, $myNodeInfo?.nodedbCount)] as line}
         <div>{line}</div>
       {/each}
+    </div>
+    {#if searchAdvice}
+      <div class="w-0 min-w-full">
+        <div class="text-xs bg-amber-700/40 text-amber-100 rounded m-2 mt-0 p-2 break-words">{searchAdvice}</div>
+      </div>
+    {/if}
     </div>
   {/if}
   {#if justPaired}
@@ -128,7 +172,11 @@
         <div>The radio closed the connection because this computer is not paired with it. Enter the radio's Bluetooth PIN and press Pair. A radio with a screen shows its PIN there; if the PIN was never changed, it is 123456. Pairing can take up to 30 seconds.</div>
         <div class="flex gap-1">
           <input class="input w-full" type="text" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="PIN" bind:value={pin} on:input={() => (pinEditedAt = Date.now())} />
-          <button class="btn" disabled={$pairingStatus.state == 'pairing' || !pin}>Pair</button>
+          {#if $pairingStatus.state == 'pairing'}
+            <button type="button" class="btn" on:click={cancelPairing}>Cancel</button>
+          {:else}
+            <button class="btn" disabled={!pin}>Pair</button>
+          {/if}
         </div>
         {#if $pairingStatus.state == 'pairing' && $pairingStatus.address == $address}
           <div class="flex items-center gap-2">

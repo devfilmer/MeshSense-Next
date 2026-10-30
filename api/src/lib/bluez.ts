@@ -63,6 +63,17 @@ const pairingErrors: Record<string, string> = {
 
 const agentPath = '/org/meshsense/agent'
 
+/** The pairing in progress, so the user can cancel it */
+let currentPairing: { cancel: () => Promise<void>; cancelled: boolean } | undefined
+
+/** Cancels the pairing in progress, if any. Returns whether there was one. */
+export async function cancelBluezPairing(): Promise<boolean> {
+  if (!currentPairing) return false
+  currentPairing.cancelled = true
+  await currentPairing.cancel().catch(() => {})
+  return true
+}
+
 /** Answers BlueZ's request for a PIN during one pairing, then goes away. Never logs or keeps the PIN beyond that. */
 function createPinAgent(pin: string) {
   class PinAgent extends dbus.interface.Interface {
@@ -122,15 +133,19 @@ export async function pairBluezDevice(address: string, pin: string): Promise<{ o
     } catch {
       return { ok: false, message: 'The radio is not known to Bluetooth yet. Wait until it is seen in a scan, then try again.' }
     }
-    await device.getInterface('org.bluez.Device1').Pair()
+    const device1 = device.getInterface('org.bluez.Device1')
+    currentPairing = { cancel: () => device1.CancelPairing(), cancelled: false }
+    await device1.Pair()
     // Remember the radio so the link can be reopened without asking again
     await device.getInterface('org.freedesktop.DBus.Properties').Set('org.bluez.Device1', 'Trusted', new dbus.Variant('b', true)).catch(() => {})
     return { ok: true, message: 'Paired.' }
   } catch (e: any) {
+    if (currentPairing?.cancelled) return { ok: false, message: 'Pairing cancelled.' }
     const known = pairingErrors[String(e?.type)]
     console.warn('[bluetooth] Pairing failed:', String(e?.type ?? e?.message ?? e))
     return { ok: false, message: known ?? 'Pairing failed. Make sure no other app is connected to the radio, then try again.' }
   } finally {
+    currentPairing = undefined
     if (registered) {
       const bluez = await bus.getProxyObject('org.bluez', '/org/bluez').catch(() => undefined)
       await bluez?.getInterface('org.bluez.AgentManager1').UnregisterAgent(agentPath).catch(() => {})

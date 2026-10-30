@@ -322,7 +322,7 @@ export function formatTemp(tempC: number, displayFahrenheit?: boolean) {
 export function connectionStatusMessage(status: string, address: string, name?: string, progress?: any) {
   let device = name && address ? `${name} (${address})` : address || 'the radio'
   switch (status) {
-    case 'searching': return `Scanning for ${device} over Bluetooth. Device not found yet.`
+    case 'searching': return `Looking for ${device} over Bluetooth…`
     case 'connecting': return `Connecting to ${device} over Bluetooth…`
     case 'configuring': return `Connected to ${device}. ${progress?.stage || 'Loading nodes'}…`
     case 'reconnecting': return `Connection to ${device} was lost. Reconnecting…`
@@ -350,7 +350,7 @@ export function bluetoothDetails(info: any, address: string, now: number): strin
 }
 
 /** Counts of what the radio has sent so far while it is being read */
-export function configProgressLines(progress: any): string[] {
+export function configProgressLines(progress: any, nodeTotal?: number): string[] {
   if (!progress || !progress.stage) return []
-  return [`Nodes read: ${progress.nodes}`, `Channels read: ${progress.channels}`, `Settings read: ${progress.configs}`, `Module settings read: ${progress.modules}`]
+  return [nodeTotal ? `Nodes read: ${progress.nodes} of about ${nodeTotal}` : `Nodes read: ${progress.nodes}`,`Channels read: ${progress.channels}`, `Settings read: ${progress.configs}`, `Module settings read: ${progress.modules}`]
 }
