@@ -17,7 +17,8 @@
   })
 
   /** A device not heard for this long is shown as last seen, not as present */
-  const staleAfterMs = 60000
+  // Bluetooth does not report a radio that sits still on every scan, so allow several minutes before calling it gone
+  const staleAfterMs = 5 * 60000
   const isStale = (seenAt: number | undefined) => !seenAt || now - seenAt > staleAfterMs
 
   /** Devices heard recently first, strongest signal first, so the nearby radio is at the top */

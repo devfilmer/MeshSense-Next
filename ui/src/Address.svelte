@@ -1,15 +1,19 @@
 <script lang="ts">
-  import { connectionStatus, address, enableTLS, lastFromRadio, lockdownStatus, nodes, myNodeNum, showNodeNameInAddress, bluetoothInfo, myNodeInfo, radioName, radioNameAddress, configProgress, pairingStatus, packets, connectionStatusSince } from 'api/src/vars'
+  import { connectionStatus, address, enableTLS, lastFromRadio, lockdownStatus, nodes, myNodeNum, showNodeNameInAddress, bluetoothInfo, myNodeInfo, currentTime, radioName, radioNameAddress, configProgress, pairingStatus, packets, connectionStatusSince } from 'api/src/vars'
   import Card from './lib/Card.svelte'
   import { smallMode } from './Nodes.svelte'
   import { hasAccess, connectionStatusMessage, bluetoothDetails, configProgressLines } from './lib/util'
   import axios from 'axios'
   import { onMount } from 'svelte'
 
-  /** Ticks every second so pairing and connecting show elapsed time */
+  /** How far the server's clock is ahead of this device's, so elapsed times from server timestamps start at 0 */
+  let clockOffset = 0
+  $: if ($currentTime) clockOffset = $currentTime - Date.now()
+
+  /** Ticks every second so pairing and connecting show elapsed time, in the server's clock */
   let now = Date.now()
   onMount(() => {
-    const timer = setInterval(() => (now = Date.now()), 1000)
+    const timer = setInterval(() => (now = Date.now() + clockOffset), 1000)
     return () => clearInterval(timer)
   })
 
@@ -36,7 +40,12 @@
   function disconnect() {
     const wasConnected = $connectionStatus == 'connected'
     pending = { label: wasConnected ? 'Disconnecting…' : 'Stopping…', from: $connectionStatus, at: Date.now() }
-    lastOutcome = wasConnected ? `Disconnected at ${new Date().toLocaleTimeString()}.` : `Stopped at ${new Date().toLocaleTimeString()}. Press Connect to try again.`
+    const time = new Date().toLocaleTimeString()
+    lastOutcome = wasConnected
+      ? `Disconnected at ${time}.`
+      : $connectionStatus == 'searching'
+        ? `Stopped looking at ${time} after ${statusSeconds} s; the radio was not found. Press Connect to try again.`
+        : `Stopped at ${time}. Press Connect to try again.`
     axios.post('/disconnect')
   }
 
@@ -89,11 +98,15 @@
   let lastPacketAt = 0
   let lastPacket: any
   // Compare the newest packet, not the count: once the log is full the count stays the same
+  let logLoaded = false
   $: if ($packets.length && $packets[$packets.length - 1] !== lastPacket) {
+    const firstSeen = !logLoaded
+    logLoaded = true
     lastPacket = $packets[$packets.length - 1]
-    // Use the packet's own receive time when it is plausible, so packets already in the log on page load are not shown as new
+    // A packet arriving while the page is open is new now. For the log already there when the page opened, use the
+    // packet's own receive time when it is plausible, so old packets are not shown as just received.
     const rxMs = Number(lastPacket?.rxTime) * 1000
-    lastPacketAt = rxMs && Math.abs(Date.now() - rxMs) < 86400000 ? Math.min(rxMs, Date.now()) : Date.now()
+    lastPacketAt = firstSeen && rxMs && Math.abs(now - rxMs) < 86400000 ? Math.min(rxMs, now) : now
   }
   $: connectedVia = /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test($address) ? 'Bluetooth' : 'the network'
   $: lastPacketSeconds = lastPacketAt ? Math.max(0, Math.round((now - lastPacketAt) / 1000)) : undefined

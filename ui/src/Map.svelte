@@ -106,8 +106,9 @@
     <div class="grow">
       <button on:click={() => ($expandedMap = !$expandedMap)} class="btn font-normal text-xs">{$expandedMap ? 'Collapse' : 'Expand'}</button>
     </div>
-    <div class="text-xs text-white/50 pr-2">MeshSense Next {$version}</div>
-    <a href="https://affirmatech.com/meshsense" target="_blank" rel="noopener" title="MeshSense Next is based on MeshSense by Affirmatech" class="text-xs text-white/50 pr-2 font-normal">based on MeshSense by Affirmatech</a>
+    <!-- Text is hidden on a phone so the buttons stay on screen -->
+    <div class="hidden md:block text-xs text-white/50 pr-2">MeshSense Next {$version}</div>
+    <a href="https://affirmatech.com/meshsense" target="_blank" rel="noopener" title="MeshSense Next is based on MeshSense by Affirmatech" class="hidden md:inline text-xs text-white/50 pr-2 font-normal">based on MeshSense by Affirmatech</a>
     <a title="Support MeshSense (Affirmatech)" target="_blank" rel="noopener" class="!text-rose-400 font-bold btn text-sm hover:brightness-110" href="https://purchase.affirmatech.com/?productId=MeshSenseDonation"
       >♥</a
     >

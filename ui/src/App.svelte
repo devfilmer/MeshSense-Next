@@ -66,7 +66,7 @@
         <div class="text-3xl font-bold text-white">Welcome to MeshSense Next!</div>
         <div class="text-sm text-white/50 mt-1">Based on <a target="_blank" rel="noopener" href="https://affirmatech.com/meshsense">MeshSense</a> by Affirmatech</div>
         <div class="max-w-md mt-5 flex flex-col gap-4">
-          <div>Available bluetooth devices will appear on the left</div>
+          <div>Bluetooth radios nearby appear in the BLE Devices list. Click one to connect.</div>
           <div>If your device is on the network, enter its IP address in the Address field and click Connect.</div>
 
           {#if !$hasAccess}
