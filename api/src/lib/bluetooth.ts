@@ -197,6 +197,12 @@ async function startScanLoop(targetId?: string) {
   }
 }
 
+/** Marks a device in the list as heard now, for one the app was just connected to */
+export function markDeviceSeen(id: string) {
+  const known = bluetoothDeviceList.value.find((d: any) => d.id == id)
+  if (known) bluetoothDeviceList.upsert({ ...known, seenAt: Date.now() })
+}
+
 export function stopScanning() {
   if (scanning) console.log('[bluetooth] Stop Scanning')
   exitScanning = true

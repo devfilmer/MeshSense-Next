@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { connectionStatus, address, enableTLS, lastFromRadio, lockdownStatus, nodes, myNodeNum, showNodeNameInAddress, bluetoothInfo, myNodeInfo, radioName, radioNameAddress, configProgress, pairingStatus } from 'api/src/vars'
+  import { connectionStatus, address, enableTLS, lastFromRadio, lockdownStatus, nodes, myNodeNum, showNodeNameInAddress, bluetoothInfo, myNodeInfo, radioName, radioNameAddress, configProgress, pairingStatus, packets, connectionStatusSince } from 'api/src/vars'
   import Card from './lib/Card.svelte'
   import { smallMode } from './Nodes.svelte'
   import { hasAccess, connectionStatusMessage, bluetoothDetails, configProgressLines } from './lib/util'
@@ -74,18 +74,30 @@
   $: deviceName = $nodes.find((n) => n.num == $myNodeNum)?.user?.shortName || ''
   $: addressLabel = $showNodeNameInAddress && deviceName && $connectionStatus != 'disconnected' ? `${deviceName} (${$address})` : $address
 
-  /** When the connection status last changed, for the elapsed time beside it */
-  let statusSince = Date.now()
-  $: $connectionStatus, (statusSince = Date.now())
-  $: statusSeconds = Math.max(0, Math.round((now - statusSince) / 1000))
+  /** Time in the current status, from the server so it survives page reloads and is the same in every tab */
+  $: statusSeconds = Math.max(0, Math.round((now - ($connectionStatusSince || now)) / 1000))
 
   $: statusMessage = connectionStatusMessage($connectionStatus, $address, $radioNameAddress == $address ? $radioName : '', $configProgress)
   $: busyMessage = statusMessage && `${statusMessage} (${statusSeconds} s)`
   /** A search that goes on this long is not just slow; say what usually causes it */
   $: searchAdvice =
     $connectionStatus == 'searching' && statusSeconds >= 45
-      ? 'Not found yet. Check that the radio is on and nearby, and that no phone or other app is connected to it: a connected radio stops advertising. Press Cancel to stop looking.'
+      ? 'Not found yet. Check that the address is right, that the radio is on and nearby, and that no phone or other app is connected to it: a connected radio stops advertising. Press Cancel to stop looking.'
       : ''
+
+  /** When this page last saw a packet arrive, so a connected user can tell the link is alive */
+  let lastPacketAt = 0
+  let lastPacket: any
+  // Compare the newest packet, not the count: once the log is full the count stays the same
+  $: if ($packets.length && $packets[$packets.length - 1] !== lastPacket) {
+    lastPacket = $packets[$packets.length - 1]
+    // Use the packet's own receive time when it is plausible, so packets already in the log on page load are not shown as new
+    const rxMs = Number(lastPacket?.rxTime) * 1000
+    lastPacketAt = rxMs && Math.abs(Date.now() - rxMs) < 86400000 ? Math.min(rxMs, Date.now()) : Date.now()
+  }
+  $: connectedVia = /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test($address) ? 'Bluetooth' : 'the network'
+  $: lastPacketSeconds = lastPacketAt ? Math.max(0, Math.round((now - lastPacketAt) / 1000)) : undefined
+  $: lastPacketText = lastPacketSeconds == undefined ? 'no packets received yet since this page opened' : lastPacketSeconds < 60 ? `last packet ${lastPacketSeconds} s ago` : `last packet ${Math.round(lastPacketSeconds / 60)} min ago`
 
   $: lockdownNotice = ['NEEDS_PROVISION', 'LOCKED', 'UNLOCK_FAILED'].includes($lockdownStatus?.stateName) ? $lockdownStatus : undefined
 </script>
@@ -134,6 +146,8 @@
       <div class="animate-spin rounded-full h-3 w-3 border-2 border-yellow-200 border-t-transparent" role="status" aria-label="Working"></div>
       {pending.label}
     </div>
+  {:else if $connectionStatus == 'connected'}
+    <div class="text-xs text-white/60 px-2 pb-2">Connected over {connectedVia}, {lastPacketText}.</div>
   {:else if lastOutcome && $connectionStatus == 'disconnected'}
     <div class="text-xs text-white/60 px-2 pb-2">{lastOutcome}</div>
   {/if}
@@ -145,7 +159,8 @@
       {busyMessage}
     </div>
     <div class="text-xs text-white/60 px-2 pb-2 grid gap-0.5">
-      {#each [...bluetoothDetails($bluetoothInfo, $address, now), ...configProgressLines($configProgress, $myNodeInfo?.nodedbCount)] as line}
+      <!-- Scanner details only matter while looking for the radio; once it is found they are old news -->
+      {#each [...(['searching', 'reconnecting'].includes($connectionStatus) ? bluetoothDetails($bluetoothInfo, $address, now, $connectionStatusSince) : []),...configProgressLines($configProgress, $myNodeInfo?.nodedbCount)] as line}
         <div>{line}</div>
       {/each}
     </div>
@@ -185,6 +200,8 @@
           </div>
         {:else if pairingResult?.state == 'failed'}
           <div class="text-red-200">{pairingResult.message} (attempt at {new Date(pairingResult.at).toLocaleTimeString()})</div>
+        {:else if pairingResult?.state == 'cancelled'}
+          <div>{pairingResult.message}</div>
         {/if}
       </form>
     </div>

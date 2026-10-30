@@ -96,7 +96,8 @@ createRoutes((app) => {
       pairingStatus.set({ state: 'pairing', message: 'Sending the PIN and waiting for the radio to accept it. This can take up to 30 seconds…', address: pairAddress, at: startedAt })
       result = await pairBluezDevice(pairAddress, pin)
     }
-    pairingStatus.set({ state: result.ok ? 'paired' : 'failed', message: result.message, address: pairAddress, at: Date.now() })
+    const state = result.ok ? 'paired' : pairCancelRequested ? 'cancelled' : 'failed'
+    pairingStatus.set({ state, message: state == 'cancelled' ? 'Pairing cancelled. Enter the PIN and press Pair to try again.' : result.message, address: pairAddress, at: Date.now() })
     if (result.ok) {
       bluetoothInfo.set({ ...bluetoothInfo.value, needsPairing: '', targetPaired: true })
       connect(pairAddress)

@@ -44,20 +44,21 @@
 <UpdateStatus />
 <SettingsModal />
 
-<main class="w-full grid grid-cols-[auto_1fr] gap-2 p-2 overflow-auto h-full">
+<!-- On a phone the two columns stack and the page scrolls; side by side the right column was squeezed to nothing -->
+<main class="w-full grid grid-cols-1 md:grid-cols-[auto_1fr] gap-2 p-2 overflow-auto h-full">
   <News />
-  <div class="flex flex-col gap-2 content-start h-full overflow-auto">
+  <div class="flex flex-col gap-2 content-start md:h-full md:overflow-auto">
     {#if $hasAccess}
       <Address class="shrink-0" />
     {/if}
     <Bluetooth class="shrink-0" />
     <!-- <Channels class="shrink-0" /> -->
-    <Nodes {ol} class="grow" />
+    <Nodes {ol} class="grow max-h-[70vh] md:max-h-none" />
     {#if window.location.hostname == 'localhost' || $hasAccess || $allowRemoteMessaging}
       <Message />
     {/if}
   </div>
-  <div id="content" class="grid grid-rows-[5fr_3fr] content-start h-full overflow-auto gap-2 relative">
+  <div id="content" class="grid grid-rows-[5fr_3fr] content-start h-[85vh] md:h-full overflow-auto gap-2 relative">
     {#if $connectionStatus == 'connected'}
       <Map class={$expandedMap ? 'row-span-full col-span-full' : ''} bind:ol />
     {:else}

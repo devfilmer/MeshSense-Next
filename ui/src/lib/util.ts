@@ -324,24 +324,29 @@ export function connectionStatusMessage(status: string, address: string, name?: 
   switch (status) {
     case 'searching': return `Looking for ${device} over Bluetooth…`
     case 'connecting': return `Connecting to ${device} over Bluetooth…`
-    case 'configuring': return `Connected to ${device}. ${progress?.stage || 'Loading nodes'}…`
+    case 'configuring': return `Reading from ${device}: ${progress?.stage || 'Loading nodes'}…`
     case 'reconnecting': return `Connection to ${device} was lost. Reconnecting…`
     default: return undefined
   }
 }
 
 /** Plain-language details about the Bluetooth scanner, for the address box and map */
-export function bluetoothDetails(info: any, address: string, now: number): string[] {
+export function bluetoothDetails(info: any, address: string, now: number, since = 0): string[] {
   if (!info) return []
+  // Scans stop while connected, so results from before this attempt began are old news; leave them out
+  if (since && info.lastScanAt < since) info = { ...info, lastScanAt: undefined, waitingForScan: true }
+  if (since && info.targetSeenAt < since) info = { ...info, targetSeenAt: undefined, targetRssi: undefined }
   let lines: string[] = [info.adapterAvailable ? 'Bluetooth adapter ready' : 'No Bluetooth adapter found']
   // What is known about the radio only applies when it is the radio in the address box
   const forThisRadio = !info.targetAddress || info.targetAddress == address
-  if (forThisRadio && info.targetPaired === false) lines.push('Not paired with this radio yet. It must be paired before it can connect.')
+  if (forThisRadio && info.targetPaired === false) lines.push('This computer is not paired with the radio yet. If the radio requires a PIN, you will be asked for it.')
   const scanAge = info.lastScanAt ? Math.max(0, Math.round((now - info.lastScanAt) / 1000)) : undefined
   if (info.scanning && scanAge > 30) lines.push(`Bluetooth scanning has not run for ${scanAge} s. It restarts automatically; if this stays, restart MeshSense.`)
   else if (scanAge != undefined) lines.push(`Last scan ${scanAge} s ago, ${info.devicesSeen} devices seen since start`)
+  else if (info.waitingForScan) lines.push('Starting a Bluetooth scan…')
   if (forThisRadio) {
-    lines.push(info.targetSeenAt ? `${address} seen ${Math.max(0, Math.round((now - info.targetSeenAt) / 1000))} s ago` : `${address} not seen since start`)
+    if (info.targetSeenAt) lines.push(`${address} seen ${Math.max(0, Math.round((now - info.targetSeenAt) / 1000))} s ago`)
+    else if (!info.waitingForScan) lines.push(`${address} not heard in a scan yet`)
     if (info.targetRssi != undefined) lines.push(`Bluetooth signal ${info.targetRssi} dBm`)
     if (info.staleLinkCleared) lines.push('Cleared an old Bluetooth link to the radio')
   }

@@ -4,6 +4,8 @@ export let version = new State('version', '')
 export let headless = new State('headless', '')
 export let address = new State('address', '', { persist: 'api' })
 export let connectionStatus = new State<'connected' | 'connecting' | 'disconnected' | 'searching' | 'configuring' | 'reconnecting'>('connectionStatus', 'disconnected')
+/** When the connection status last changed to a different value, so every page shows the same elapsed time */
+export let connectionStatusSince = new State<number>('connectionStatusSince', Date.now(), { hideLog: true })
 export let lastFromRadio = new State('lastFromRadio', undefined, { hideLog: true })
 export let channels = new State<Channel[]>('channels', [], { primaryKey: 'index', hideLog: true, redact: ['psk'] })
 export let packets = new State<MeshPacket[]>('packets', [], { hideLog: true })

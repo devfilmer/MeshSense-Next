@@ -25,6 +25,12 @@
     .slice()
     .sort((a, b) => Number(isStale(a.seenAt)) - Number(isStale(b.seenAt)) || (b.rssi ?? -999) - (a.rssi ?? -999))
 
+  /** The device just clicked, marked until the connection starts so the click never looks ignored */
+  let startingId = ''
+  let startingAt = 0
+  $: if (startingId && !startingAt) startingAt = now
+  $: if (startingId && ($connectionStatus != 'disconnected' || now - startingAt > 15000)) (startingId = ''), (startingAt = 0)
+
   function seenText(rssi: number | undefined, seenAt: number | undefined) {
     if (isStale(seenAt)) return seenAt ? `seen ${Math.round((now - seenAt) / 60000) || 1} min ago` : 'not seen recently'
     return rssi != undefined ? `${rssi} dBm` : ''
@@ -45,12 +51,16 @@
           class:opacity-50={isStale(seenAt)}
           title="Connect to {name} ({id})"
           class:hidden={name.startsWith('Unknown or Unsupported Device')}
+          disabled={!!startingId}
           on:click={() => {
             $address = id
+            startingId = id
             axios.post('/connect', { address: id })
           }}
         >
-          <span class="flex justify-between gap-2 w-full"><span>{name}</span><span class="text-white/60 text-xs">{seenText(rssi, seenAt)}</span></span>
+          <span class="flex justify-between gap-2 w-full"
+            ><span>{name}</span><span class="text-white/60 text-xs">{startingId == id ? 'Starting…' : seenText(rssi, seenAt)}</span></span
+          >
         </button>
       {/each}
     </div>

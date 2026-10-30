@@ -15,6 +15,7 @@ import {
   broadcastId,
   channels,
   connectionStatus,
+  connectionStatusSince,
   enableTLS,
   lastFromRadio,
   lockdownStatus,
@@ -35,7 +36,7 @@ import {
   tracerouteRateLimit,
   version
 } from './vars'
-import { beginScanning, bluetoothDevices, stopScanning } from './lib/bluetooth'
+import { beginScanning, bluetoothDevices, markDeviceSeen, stopScanning } from './lib/bluetooth'
 import { clearBluezLink, isBluezPaired } from './lib/bluez'
 import exitHook from 'exit-hook'
 import * as geolib from 'geolib'
@@ -150,7 +151,12 @@ packets.subscribe(() => {
   while (packets.value?.length > limit) packets.shift()
 })
 
+let previousConnectionStatus = connectionStatus.value
 connectionStatus.subscribe((value) => {
+  if (value != previousConnectionStatus) {
+    previousConnectionStatus = value
+    connectionStatusSince.set(Date.now())
+  }
   if (value == 'disconnected' || value == 'searching' || value == 'reconnecting') {
     beginScanning()
   } else stopScanning()
@@ -245,6 +251,8 @@ function countConfig(key: 'nodes' | 'channels' | 'configs' | 'modules') {
 
 /** Disconnect from any existing connection */
 export async function disconnect(setIntent = true) {
+  // The radio was in use until now; scans stop while connected, so record it as just seen rather than minutes ago
+  if (['connected', 'configuring'].includes(connectionStatus.value as string)) markDeviceSeen(String(address.value ?? ''))
   connectionStatus.set('disconnected')
   if (setIntent) connectionIntended = false
   console.log('Disconnecting from device')
@@ -290,7 +298,8 @@ export async function connect(address?: string) {
   // A different radio: drop the previous radio's name and pairing request. For the same radio, keep the
   // pairing request showing; trying again cannot succeed until it is paired.
   if (radioNameAddress.value != address) {
-    radioName.set('')
+    // A radio already heard in a scan has a name; show it from the start instead of only the address
+    radioName.set(bluetoothDevices[address]?.name || '')
     radioNameAddress.set(address)
     pairingStatus.set({ state: 'idle', message: '' })
   }
