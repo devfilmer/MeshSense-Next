@@ -348,6 +348,8 @@ export async function connect(address?: string) {
     } else if (e == 7) {
       reachedConfigured = true
       if (bluetoothInfo.value?.needsPairing) bluetoothInfo.set({ ...bluetoothInfo.value, needsPairing: '' })
+      // Pairing is finished once the radio is connected; a later disconnect must not bring back "Paired… now connecting"
+      if (pairingStatus.value?.state == 'paired') pairingStatus.set({ state: 'idle', message: '' })
       connectionStatus.set('connected')
       // setTime()
       // } else if (e == 4) {

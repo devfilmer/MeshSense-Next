@@ -99,6 +99,10 @@
   let lastPacket: any
   // Compare the newest packet, not the count: once the log is full the count stays the same
   let logLoaded = false
+  // Only a page opened while already connected has an old log to date from the packets; otherwise every packet is new
+  $: if ($connectionStatus != 'connected') logLoaded = true
+  // A packet from before a disconnect says nothing about the new link
+  $: if ($connectionStatus != 'connected') lastPacketAt = 0
   $: if ($packets.length && $packets[$packets.length - 1] !== lastPacket) {
     const firstSeen = !logLoaded
     logLoaded = true
@@ -154,6 +158,14 @@
       {/if}
     {/if}
   </form>
+  {#if justPaired}
+    <div class="w-0 min-w-full">
+      <div class="text-xs bg-green-800/40 text-green-100 rounded m-2 mt-0 p-2 flex items-center gap-2 break-words">
+        <div class="shrink-0 animate-spin rounded-full h-3 w-3 border-2 border-green-100 border-t-transparent" role="status" aria-label="Connecting"></div>
+        <div><span class="font-bold">✓ Paired with {pairingName}.</span> Now connecting: the radio is found by a Bluetooth scan first, then its nodes are read. This usually takes under a minute.</div>
+      </div>
+    </div>
+  {/if}
   {#if pending}
     <div class="flex items-center gap-2 text-xs text-yellow-200 px-2 pb-2">
       <div class="animate-spin rounded-full h-3 w-3 border-2 border-yellow-200 border-t-transparent" role="status" aria-label="Working"></div>
@@ -184,14 +196,6 @@
     {/if}
     </div>
   {/if}
-  {#if justPaired}
-    <div class="w-0 min-w-full">
-      <div class="text-xs bg-green-800/40 text-green-100 rounded m-2 mt-0 p-2 flex items-center gap-2 break-words">
-        <div class="shrink-0 animate-spin rounded-full h-3 w-3 border-2 border-green-100 border-t-transparent" role="status" aria-label="Connecting"></div>
-        <div>Paired with {pairingName}. Now connecting: the radio is found by a Bluetooth scan first, then its nodes are read. This usually takes under a minute ({pairingSeconds} s so far).</div>
-      </div>
-    </div>
-  {/if}
   {#if needsPairing && $hasAccess}
     <!-- Zero width plus full minimum width: the box fills the card but its long text never widens the column -->
     <div class="w-0 min-w-full">
@@ -199,11 +203,12 @@
         <div class="font-bold">{pairingName} needs to be paired</div>
         <div>The radio closed the connection because this computer is not paired with it. Enter the radio's Bluetooth PIN and press Pair. A radio with a screen shows its PIN there; if the PIN was never changed, it is 123456. Pairing can take up to 30 seconds.</div>
         <div class="flex gap-1">
-          <input class="input w-full" type="text" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="PIN" bind:value={pin} on:input={() => (pinEditedAt = Date.now())} />
+          <!-- Taller on a phone so the field and buttons are easy to tap -->
+          <input class="input w-full min-h-[44px] md:min-h-0" type="text" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="PIN" bind:value={pin} on:input={() => (pinEditedAt = Date.now())} />
           {#if $pairingStatus.state == 'pairing'}
-            <button type="button" class="btn" on:click={cancelPairing}>Cancel</button>
+            <button type="button" class="btn min-h-[44px] min-w-[64px] md:min-h-0 md:min-w-0" on:click={cancelPairing}>Cancel</button>
           {:else}
-            <button class="btn" disabled={!pin}>Pair</button>
+            <button class="btn min-h-[44px] min-w-[64px] md:min-h-0 md:min-w-0" disabled={!pin}>Pair</button>
           {/if}
         </div>
         {#if $pairingStatus.state == 'pairing' && $pairingStatus.address == $address}
@@ -212,7 +217,7 @@
             {$pairingStatus.message} ({pairingSeconds} s)
           </div>
         {:else if pairingResult?.state == 'failed'}
-          <div class="text-red-200">{pairingResult.message} (attempt at {new Date(pairingResult.at).toLocaleTimeString()})</div>
+          <div class="text-red-200">{pairingResult.message} (attempt at {new Date(pairingResult.at - clockOffset).toLocaleTimeString()})</div>
         {:else if pairingResult?.state == 'cancelled'}
           <div>{pairingResult.message}</div>
         {/if}

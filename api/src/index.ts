@@ -94,7 +94,7 @@ createRoutes((app) => {
     let result = { ok: false, message: 'Pairing cancelled.' }
     if (!pairCancelRequested) {
       pairingStatus.set({ state: 'pairing', message: 'Sending the PIN and waiting for the radio to accept it. This can take up to 30 seconds…', address: pairAddress, at: startedAt })
-      result = await pairBluezDevice(pairAddress, pin)
+      result = await pairBluezDevice(pairAddress, pin, (message) => pairingStatus.set({ ...pairingStatus.value, message }))
     }
     const state = result.ok ? 'paired' : pairCancelRequested ? 'cancelled' : 'failed'
     pairingStatus.set({ state, message: state == 'cancelled' ? 'Pairing cancelled. Enter the PIN and press Pair to try again.' : result.message, address: pairAddress, at: Date.now() })

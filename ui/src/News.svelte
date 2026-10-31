@@ -7,10 +7,11 @@
 
 <script>
   import Modal from './lib/Modal.svelte'
-  import { meshSenseNewsDate, bluetoothInfo, pairingStatus } from 'api/src/vars'
+  import { meshSenseNewsDate, bluetoothInfo, pairingStatus, connectionStatus } from 'api/src/vars'
   console.log({ lastViewedNewsDate })
-  /** The news would cover the pairing box; hold it back until pairing is out of the way */
-  $: pairingNeeded = !!$bluetoothInfo?.needsPairing || $pairingStatus?.state == 'pairing'
+  /** The news would cover the pairing box or the connect progress; hold it back until those are out of the way */
+  $: pairingNeeded =
+    !!$bluetoothInfo?.needsPairing || $pairingStatus?.state == 'pairing' || ['searching', 'connecting', 'configuring', 'reconnecting'].includes($connectionStatus)
   $: if (lastViewedNewsDate < $meshSenseNewsDate && !pairingNeeded) {
     console.log({ lastViewedNewsDate, $meshSenseNewsDate })
     newsVisible.set(true)

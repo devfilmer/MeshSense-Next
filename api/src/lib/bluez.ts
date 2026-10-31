@@ -53,7 +53,7 @@ export async function isBluezPaired(address: string): Promise<boolean | undefine
 const pairingErrors: Record<string, string> = {
   'org.bluez.Error.AuthenticationFailed': 'The radio rejected the PIN. Check the PIN and try again.',
   'org.bluez.Error.AuthenticationRejected': 'The radio rejected the PIN. Check the PIN and try again.',
-  'org.bluez.Error.AuthenticationCanceled': 'Pairing was cancelled by the radio.',
+  'org.bluez.Error.AuthenticationCanceled': 'The radio stopped the pairing, which it can do after several wrong PINs in a row. Wait about 30 seconds, check the PIN, and try again.',
   'org.bluez.Error.AuthenticationTimeout': 'The radio did not respond in time. Move it closer and try again.',
   'org.bluez.Error.ConnectionAttemptFailed': 'Could not reach the radio. Move it closer and make sure no other app is connected to it.',
   'org.bluez.Error.AlreadyExists': 'The radio is already paired.',
@@ -65,6 +65,17 @@ const agentPath = '/org/meshsense/agent'
 
 /** The pairing in progress, so the user can cancel it */
 let currentPairing: { cancel: () => Promise<void>; cancelled: boolean } | undefined
+
+/** The device object with its Device1 interface, or undefined when BlueZ does not currently have it */
+async function getBluezDevice(bus: dbus.MessageBus, devicePath: string) {
+  try {
+    const device = await bus.getProxyObject('org.bluez', devicePath)
+    device.getInterface('org.bluez.Device1')
+    return device
+  } catch {
+    return undefined
+  }
+}
 
 /** Cancels the pairing in progress, if any. Returns whether there was one. */
 export async function cancelBluezPairing(): Promise<boolean> {
@@ -111,10 +122,12 @@ function createPinAgent(pin: string) {
  * Pairs the radio with this computer using a PIN, as `bluetoothctl pair` would, so no one has to use the Pi's own
  * Bluetooth settings. Resolves to `{ ok, message }`; the message is meant to be shown to the user.
  */
-export async function pairBluezDevice(address: string, pin: string): Promise<{ ok: boolean; message: string }> {
+export async function pairBluezDevice(address: string, pin: string, onStatus?: (message: string) => void): Promise<{ ok: boolean; message: string }> {
   const bus = dbus.systemBus()
   const agent = createPinAgent(pin)
   let registered = false
+  // Cancel does nothing until the device is known; the cancelled flag is checked at each step before then
+  currentPairing = { cancel: async () => {}, cancelled: false }
   try {
     const bluez = await bus.getProxyObject('org.bluez', '/org/bluez')
     const adapterPath = bluez.nodes.find((n) => /^\/org\/bluez\/hci\d+$/.test(n))
@@ -127,14 +140,25 @@ export async function pairBluezDevice(address: string, pin: string): Promise<{ o
     registered = true
     await manager.RequestDefaultAgent(agentPath)
 
-    let device
-    try {
-      device = await bus.getProxyObject('org.bluez', devicePath)
-    } catch {
-      return { ok: false, message: 'The radio is not known to Bluetooth yet. Wait until it is seen in a scan, then try again.' }
+    // BlueZ forgets an unpaired radio shortly after a failed pairing or once scanning stops. Then look for it
+    // briefly with our own discovery, so trying again straight away works instead of failing with an internal error.
+    let device = await getBluezDevice(bus, devicePath)
+    if (!device) {
+      onStatus?.('Looking for the radio over Bluetooth before sending the PIN…')
+      const adapter1 = (await bus.getProxyObject('org.bluez', adapterPath)).getInterface('org.bluez.Adapter1')
+      await adapter1.StartDiscovery().catch(() => {})
+      for (let i = 0; i < 15 && !device && !currentPairing.cancelled; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        device = await getBluezDevice(bus, devicePath)
+      }
+      await adapter1.StopDiscovery().catch(() => {})
+      if (currentPairing.cancelled) return { ok: false, message: 'Pairing cancelled.' }
+      if (!device) return { ok: false, message: 'The radio was not found over Bluetooth. Check that it is on and nearby, then try again.' }
+      onStatus?.('Sending the PIN and waiting for the radio to accept it. This can take up to 30 seconds…')
     }
     const device1 = device.getInterface('org.bluez.Device1')
-    currentPairing = { cancel: () => device1.CancelPairing(), cancelled: false }
+    currentPairing.cancel = () => device1.CancelPairing()
+    if (currentPairing.cancelled) return { ok: false, message: 'Pairing cancelled.' }
     await device1.Pair()
     // Remember the radio so the link can be reopened without asking again
     await device.getInterface('org.freedesktop.DBus.Properties').Set('org.bluez.Device1', 'Trusted', new dbus.Variant('b', true)).catch(() => {})
